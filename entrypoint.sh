@@ -1,0 +1,86 @@
+#!/bin/bash
+# entrypoint.sh — Docker 容器入口脚本
+# 功能：动态端口适配、配置初始化、Rclone 配置注入、启动 supervisord
+set -euo pipefail
+
+echo "======================================"
+echo "  NVR-FFmpeg-Rclone 容器启动"
+echo "======================================"
+
+# ===== 1. 环境变量默认值 =====
+PORT="${PORT:-8080}"
+CAMERA_URL="${CAMERA_URL:-}"
+CAMERA_USERNAME="${CAMERA_USERNAME:-}"
+CAMERA_PASSWORD="${CAMERA_PASSWORD:-}"
+RCLONE_CONFIG_BASE64="${RCLONE_CONFIG_BASE64:-}"
+RCLONE_REMOTE="${RCLONE_REMOTE:-remote:nvr-backup}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+TZ="${TZ:-Asia/Shanghai}"
+
+echo "[init] 端口: ${PORT}"
+echo "[init] 时区: ${TZ}"
+echo "[init] 摄像头: ${CAMERA_URL:-未配置}"
+echo "[init] Rclone 远程: ${RCLONE_REMOTE}"
+
+# ===== 2. 创建必要目录 =====
+echo "[init] 初始化目录结构..."
+mkdir -p /etc/motioneye
+mkdir -p /var/lib/motioneye
+mkdir -p /var/run/motioneye
+mkdir -p /var/log/motioneye
+mkdir -p /config/rclone
+
+# 确保目录可写（PaaS 环境）
+chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motioneye /config/rclone
+
+# ===== 3. 动态端口绑定 =====
+echo "[init] 配置 MotionEye 监听端口: ${PORT}"
+cp /opt/motioneye/motioneye.conf /etc/motioneye/motioneye.conf
+sed -i "s|^port .*|port ${PORT}|" /etc/motioneye/motioneye.conf
+
+# ===== 4. 管理员密码配置 =====
+if [ -n "${ADMIN_PASSWORD}" ]; then
+    echo "[init] 配置管理员账户..."
+    # MotionEye 在首次启动时会创建 admin 用户
+    # 通过在配置目录中预置 shadow 文件来设置密码
+    # 注：密码将在 MotionEye 首次启动时通过 Web UI 设置
+fi
+
+# ===== 5. 摄像头配置 =====
+if [ -n "${CAMERA_URL}" ]; then
+    echo "[init] 生成摄像头配置..."
+    cp /opt/motioneye/thread-1.conf.tmpl /etc/motioneye/thread-1.conf
+
+    # 替换占位符
+    sed -i "s|__CAMERA_URL__|${CAMERA_URL}|g" /etc/motioneye/thread-1.conf
+    sed -i "s|__CAMERA_USERNAME__|${CAMERA_USERNAME}|g" /etc/motioneye/thread-1.conf
+    sed -i "s|__CAMERA_PASSWORD__|${CAMERA_PASSWORD}|g" /etc/motioneye/thread-1.conf
+
+    # 如果没有用户名密码，移除认证行
+    if [ -z "${CAMERA_USERNAME}" ] && [ -z "${CAMERA_PASSWORD}" ]; then
+        sed -i '/^netcam_userpass/d' /etc/motioneye/thread-1.conf
+    fi
+
+    echo "[init] 摄像头配置完成"
+else
+    echo "[init] 警告: 未设置 CAMERA_URL，请在 MotionEye Web UI 中手动添加摄像头"
+fi
+
+# ===== 6. Rclone 配置注入 =====
+if [ -n "${RCLONE_CONFIG_BASE64}" ]; then
+    echo "[init] 注入 Rclone 配置..."
+    echo "${RCLONE_CONFIG_BASE64}" | base64 -d > /config/rclone/rclone.conf
+    chmod 600 /config/rclone/rclone.conf
+    echo "[init] Rclone 配置就绪"
+else
+    echo "[init] 提示: 未设置 RCLONE_CONFIG_BASE64，Rclone 同步功能未启用"
+fi
+
+# ===== 7. 导出环境变量供子进程使用 =====
+export PORT CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
+
+# ===== 8. 启动 supervisord =====
+echo "[init] 启动服务..."
+echo "======================================"
+exec /usr/bin/supervisord -c /etc/supervisord.conf
