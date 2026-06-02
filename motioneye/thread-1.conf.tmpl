@@ -62,6 +62,9 @@ ffmpeg_video_codec mp4
 # 核心：开启直通模式（不解码，不重编码）
 movie_passthrough on
 
+# 保存视频时间（7天=1周），MotionEye 会自动清理过期视频
+# @preserve_movies 7
+
 # 每段视频最大时长（秒）—— 5分钟分片，方便 Rclone 尽快搬走
 movie_max_time 300
 
