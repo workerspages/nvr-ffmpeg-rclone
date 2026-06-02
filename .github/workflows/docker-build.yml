@@ -2,7 +2,7 @@ name: Build and Push Multi-Platform Docker Image
 
 on:
   push:
-    branches: [main]
+    branches: [cloudflare]
     tags: ['v*']
   workflow_dispatch:
 
