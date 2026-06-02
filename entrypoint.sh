@@ -90,16 +90,16 @@ sed -i "s|^port .*|port ${PORT}|" /etc/motioneye/motioneye.conf
 # ===== 6. 摄像头配置 =====
 if [ -n "${CAMERA_URL}" ]; then
     echo "[init] 生成摄像头配置..."
-    cp /opt/motioneye/thread-1.conf.tmpl /etc/motioneye/thread-1.conf
+    cp /opt/motioneye/thread-1.conf.tmpl /etc/motioneye/camera-1.conf
 
     # 替换占位符
-    sed -i "s|__CAMERA_URL__|${CAMERA_URL}|g" /etc/motioneye/thread-1.conf
-    sed -i "s|__CAMERA_USERNAME__|${CAMERA_USERNAME}|g" /etc/motioneye/thread-1.conf
-    sed -i "s|__CAMERA_PASSWORD__|${CAMERA_PASSWORD}|g" /etc/motioneye/thread-1.conf
+    sed -i "s|__CAMERA_URL__|${CAMERA_URL}|g" /etc/motioneye/camera-1.conf
+    sed -i "s|__CAMERA_USERNAME__|${CAMERA_USERNAME}|g" /etc/motioneye/camera-1.conf
+    sed -i "s|__CAMERA_PASSWORD__|${CAMERA_PASSWORD}|g" /etc/motioneye/camera-1.conf
 
     # 如果没有用户名密码，移除认证行
     if [ -z "${CAMERA_USERNAME}" ] && [ -z "${CAMERA_PASSWORD}" ]; then
-        sed -i '/^netcam_userpass/d' /etc/motioneye/thread-1.conf
+        sed -i '/^netcam_userpass/d' /etc/motioneye/camera-1.conf
     fi
 
     echo "[init] 摄像头配置完成"
