@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     # Motion 运行依赖
     libmicrohttpd12 \
+    v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # ===== 安装 ZeroTier（虚拟局域网穿透） =====
