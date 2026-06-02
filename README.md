@@ -12,7 +12,11 @@
 ┌─────────────────────────────────────────────┐
 │           Docker Container (PaaS)           │
 │                                             │
-│  ┌─────────────┐    ┌──────────────────┐    │
+│  ┌─────────────┐                              │
+│  │  ZeroTier   │  ← 加入家庭网络                │
+│  └──────┬──────┘                              │
+│         │                                    │
+│  ┌──────┴──────┐    ┌──────────────────┐    │
 │  │  MotionEye  │    │   Rclone Cron    │    │
 │  │  (Web UI +  │    │  (定时备份到网盘) │    │
 │  │   录制)     │    │                  │    │
@@ -29,11 +33,12 @@
                ▼
           用户浏览器
 
-家庭摄像头 ──(ZeroTier)──▶ MotionEye (RTSP)
+家庭摄像头 ──(ZeroTier 穿透)──▶ 容器内 ZeroTier ──▶ MotionEye (RTSP)
 ```
 
 ## 核心特性
 
+- **ZeroTier 内置客户端**：容器启动时自动加入 ZeroTier 网络，直接访问家庭局域网
 - **Passthrough 直通模式**：不解码、不重编码，极低 CPU/内存消耗
 - **动态端口绑定**：自动读取 PaaS 注入的 `$PORT` 环境变量
 - **Rclone 自动备份**：定时将录像移动到云网盘，释放本地空间
@@ -57,7 +62,10 @@ docker pull <your-dockerhub-username>/nvr-ffmpeg-rclone:latest
 ```bash
 docker run -d \
   --name nvr \
+  --cap-add NET_ADMIN \
+  --device /dev/net/tun:/dev/net/tun \
   -p 8080:8080 \
+  -e ZEROTIER_NETWORK_ID="your_16_char_network_id" \
   -e CAMERA_URL="rtsp://user:pass@10.x.x.x:554/stream" \
   -e RCLONE_CONFIG_BASE64="$(cat rclone.conf | base64 -w 0)" \
   -e RCLONE_REMOTE="remote:nvr-backup" \
@@ -72,6 +80,7 @@ docker run -d \
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
+| `ZEROTIER_NETWORK_ID` | 推荐 | - | ZeroTier 网络 ID（16 位十六进制） |
 | `CAMERA_URL` | 推荐 | - | 摄像头 RTSP/MJPEG 流地址 |
 | `CAMERA_USERNAME` | 否 | - | 摄像头认证用户名 |
 | `CAMERA_PASSWORD` | 否 | - | 摄像头认证密码 |
@@ -81,6 +90,49 @@ docker run -d \
 | `ADMIN_USERNAME` | 否 | `admin` | MotionEye 管理员用户名 |
 | `ADMIN_PASSWORD` | 否 | - | MotionEye 管理员密码 |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
+
+## ZeroTier 配置指南
+
+ZeroTier 用于让 PaaS 容器加入你的家庭虚拟局域网，从而访问家里的摄像头。
+
+### 1. 获取 Network ID
+
+1. 访问 [ZeroTier Central](https://my.zerotier.com)
+2. 登录你的账号
+3. 点击你的网络（即家里路由器已加入的网络）
+4. 页面顶部的 **Network ID** 就是你需要的 16 位十六进制字符串
+
+示例：`a1b2c3d4e5f67890`
+
+### 2. 配置环境变量
+
+在 PaaS 平台设置：
+
+```
+ZEROTIER_NETWORK_ID=a1b2c3d4e5f67890
+```
+
+### 3. 授权新节点
+
+容器首次启动时，ZeroTier 会生成一个新的节点 ID。你需要在 ZeroTier Central 中授权该节点：
+
+1. 启动容器后，查看容器日志，找到 `节点 ID: xxxxxxxxxx`
+2. 在 ZeroTier Central → 你的网络 → Members 列表中，找到该节点
+3. 勾选 **Auth** 复选框授权
+4. 等待几秒，容器将自动获取 ZeroTier IP 地址
+
+> **重要**：PaaS 平台的容器可能不支持 TUN/TAP 设备。如果 ZeroTier 无法工作，你可以考虑：
+> - 使用支持特权容器的 PaaS（如 Fly.io）
+> - 或在 VPS 上直接部署（使用 `docker run --cap-add NET_ADMIN --device /dev/net/tun`）
+
+### 4. 摄像头地址
+
+授权成功后，你的摄像头地址应使用 ZeroTier 分配的内网 IP：
+
+```
+# 示例：假设摄像头在 ZeroTier 网络中的 IP 是 10.147.17.50
+CAMERA_URL=rtsp://user:pass@10.147.17.50:554/stream
+```
 
 ## Rclone 配置指南
 

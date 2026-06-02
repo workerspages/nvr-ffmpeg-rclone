@@ -14,6 +14,7 @@ LABEL org.opencontainers.image.description="MotionEye NVR + FFmpeg + Rclone for 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
     PORT=8080 \
+    ZEROTIER_NETWORK_ID= \
     RCLONE_REMOTE=remote:nvr-backup \
     SYNC_INTERVAL=300
 
@@ -29,10 +30,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
     tzdata \
+    gnupg \
+    # 网络工具（ZeroTier 需要）
+    iproute2 \
+    iptables \
+    net-tools \
     # Motion 运行依赖
     libmicrohttpd12 \
-    # 清理
     && rm -rf /var/lib/apt/lists/*
+
+# ===== 安装 ZeroTier（虚拟局域网穿透） =====
+RUN curl -sSL https://install.zerotier.com | bash
 
 # ===== 安装 MotionEye =====
 RUN pip install --no-cache-dir --break-system-packages \
@@ -49,12 +57,14 @@ RUN mkdir -p \
     /var/log/motioneye \
     /config/rclone \
     /opt/motioneye \
+    /var/lib/zerotier-one \
     && chmod -R 777 \
     /etc/motioneye \
     /var/lib/motioneye \
     /var/run/motioneye \
     /var/log/motioneye \
-    /config/rclone
+    /config/rclone \
+    /var/lib/zerotier-one
 
 # ===== 复制配置文件 =====
 # MotionEye 配置模板

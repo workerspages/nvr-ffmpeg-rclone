@@ -9,6 +9,7 @@ echo "======================================"
 
 # ===== 1. 环境变量默认值 =====
 PORT="${PORT:-8080}"
+ZEROTIER_NETWORK_ID="${ZEROTIER_NETWORK_ID:-}"
 CAMERA_URL="${CAMERA_URL:-}"
 CAMERA_USERNAME="${CAMERA_USERNAME:-}"
 CAMERA_PASSWORD="${CAMERA_PASSWORD:-}"
@@ -20,6 +21,7 @@ TZ="${TZ:-Asia/Shanghai}"
 
 echo "[init] 端口: ${PORT}"
 echo "[init] 时区: ${TZ}"
+echo "[init] ZeroTier: ${ZEROTIER_NETWORK_ID:-未配置}"
 echo "[init] 摄像头: ${CAMERA_URL:-未配置}"
 echo "[init] Rclone 远程: ${RCLONE_REMOTE}"
 
@@ -30,16 +32,67 @@ mkdir -p /var/lib/motioneye
 mkdir -p /var/run/motioneye
 mkdir -p /var/log/motioneye
 mkdir -p /config/rclone
+mkdir -p /var/lib/zerotier-one
 
 # 确保目录可写（PaaS 环境）
-chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motioneye /config/rclone
+chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motioneye /config/rclone /var/lib/zerotier-one
 
-# ===== 3. 动态端口绑定 =====
+# ===== 3. 启动 ZeroTier（虚拟局域网穿透） =====
+if [ -n "${ZEROTIER_NETWORK_ID}" ]; then
+    echo "[init] 启动 ZeroTier 守护进程..."
+    zerotier-one -d
+
+    # 等待 ZeroTier 服务就绪
+    echo "[init] 等待 ZeroTier 服务就绪..."
+    RETRY=0
+    MAX_RETRY=30
+    while [ $RETRY -lt $MAX_RETRY ]; do
+        if zerotier-cli status 2>/dev/null | grep -q "ONLINE"; then
+            break
+        fi
+        RETRY=$((RETRY + 1))
+        sleep 1
+    done
+
+    if [ $RETRY -ge $MAX_RETRY ]; then
+        echo "[init] 警告: ZeroTier 服务启动超时，继续启动..."
+    else
+        echo "[init] ZeroTier 服务已就绪"
+    fi
+
+    # 加入 ZeroTier 网络
+    echo "[init] 加入 ZeroTier 网络: ${ZEROTIER_NETWORK_ID}"
+    zerotier-cli join "${ZEROTIER_NETWORK_ID}" || echo "[init] 警告: 加入网络失败"
+
+    # 等待获取 IP 地址（最多等待 60 秒）
+    echo "[init] 等待获取 ZeroTier IP 地址..."
+    RETRY=0
+    MAX_RETRY=60
+    while [ $RETRY -lt $MAX_RETRY ]; do
+        ZT_IP=$(zerotier-cli listnetworks 2>/dev/null | grep "${ZEROTIER_NETWORK_ID}" | awk '{print $NF}')
+        if [ -n "${ZT_IP}" ] && [ "${ZT_IP}" != "-" ]; then
+            echo "[init] ZeroTier IP: ${ZT_IP}"
+            break
+        fi
+        RETRY=$((RETRY + 1))
+        sleep 1
+    done
+
+    if [ $RETRY -ge $MAX_RETRY ]; then
+        echo "[init] 警告: 获取 ZeroTier IP 超时"
+        echo "[init] 提示: 请在 ZeroTier Central 中授权此节点"
+        echo "[init] 节点 ID: $(zerotier-cli info 2>/dev/null | awk '{print $3}')"
+    fi
+else
+    echo "[init] 提示: 未设置 ZEROTIER_NETWORK_ID，跳过 ZeroTier 配置"
+fi
+
+# ===== 4. 动态端口绑定 =====
 echo "[init] 配置 MotionEye 监听端口: ${PORT}"
 cp /opt/motioneye/motioneye.conf /etc/motioneye/motioneye.conf
 sed -i "s|^port .*|port ${PORT}|" /etc/motioneye/motioneye.conf
 
-# ===== 4. 管理员密码配置 =====
+# ===== 5. 管理员密码配置 =====
 if [ -n "${ADMIN_PASSWORD}" ]; then
     echo "[init] 配置管理员账户..."
     # MotionEye 在首次启动时会创建 admin 用户
@@ -47,7 +100,7 @@ if [ -n "${ADMIN_PASSWORD}" ]; then
     # 注：密码将在 MotionEye 首次启动时通过 Web UI 设置
 fi
 
-# ===== 5. 摄像头配置 =====
+# ===== 6. 摄像头配置 =====
 if [ -n "${CAMERA_URL}" ]; then
     echo "[init] 生成摄像头配置..."
     cp /opt/motioneye/thread-1.conf.tmpl /etc/motioneye/thread-1.conf
@@ -67,7 +120,7 @@ else
     echo "[init] 警告: 未设置 CAMERA_URL，请在 MotionEye Web UI 中手动添加摄像头"
 fi
 
-# ===== 6. Rclone 配置注入 =====
+# ===== 7. Rclone 配置注入 =====
 if [ -n "${RCLONE_CONFIG_BASE64}" ]; then
     echo "[init] 注入 Rclone 配置..."
     echo "${RCLONE_CONFIG_BASE64}" | base64 -d > /config/rclone/rclone.conf
@@ -77,10 +130,10 @@ else
     echo "[init] 提示: 未设置 RCLONE_CONFIG_BASE64，Rclone 同步功能未启用"
 fi
 
-# ===== 7. 导出环境变量供子进程使用 =====
-export PORT CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
+# ===== 8. 导出环境变量供子进程使用 =====
+export PORT ZEROTIER_NETWORK_ID CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
 
-# ===== 8. 启动 supervisord =====
+# ===== 9. 启动 supervisord =====
 echo "[init] 启动服务..."
 echo "======================================"
 exec /usr/bin/supervisord -c /etc/supervisord.conf
