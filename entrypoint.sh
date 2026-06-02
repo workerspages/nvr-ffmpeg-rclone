@@ -15,8 +15,7 @@ CAMERA_USERNAME="${CAMERA_USERNAME:-}"
 CAMERA_PASSWORD="${CAMERA_PASSWORD:-}"
 RCLONE_CONFIG_BASE64="${RCLONE_CONFIG_BASE64:-}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-remote:nvr-backup}"
-ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+RCLONE_REMOTE="${RCLONE_REMOTE:-remote:nvr-backup}"
 TZ="${TZ:-Asia/Shanghai}"
 
 echo "[init] 端口: ${PORT}"
@@ -88,13 +87,7 @@ echo "[init] 配置 MotionEye 监听端口: ${PORT}"
 cp /opt/motioneye/motioneye.conf /etc/motioneye/motioneye.conf
 sed -i "s|^port .*|port ${PORT}|" /etc/motioneye/motioneye.conf
 
-# ===== 5. 管理员密码配置 =====
-if [ -n "${ADMIN_PASSWORD}" ]; then
-    echo "[init] 配置管理员账户..."
-    # MotionEye 在首次启动时会创建 admin 用户
-    # 通过在配置目录中预置 shadow 文件来设置密码
-    # 注：密码将在 MotionEye 首次启动时通过 Web UI 设置
-fi
+# (管理员密码设置逻辑已移除，改由用户在 Web UI 首次登录后配置)
 
 # ===== 6. 摄像头配置 =====
 if [ -n "${CAMERA_URL}" ]; then

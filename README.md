@@ -75,6 +75,12 @@ docker run -d \
 
 启动后访问 `http://localhost:8080` 进入 MotionEye 管理界面。
 
+> 🔑 **默认登录凭据：**
+> - **Username (用户名)**: `admin`
+> - **Password (密码)**: *(留空，不需要输入任何字符)*
+>
+> 首次登录成功后，请务必立即在左上角的 **Settings (设置)** 面板中为 admin 账户设置新密码！
+
 ## 环境变量
 
 | 变量名 | 必填 | 默认值 | 说明 |
@@ -87,8 +93,6 @@ docker run -d \
 | `RCLONE_CONFIG_BASE64` | 否 | - | `rclone.conf` 文件的 Base64 编码 |
 | `RCLONE_REMOTE` | 否 | `remote:nvr-backup` | Rclone 远程目标路径 |
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
-| `ADMIN_USERNAME` | 否 | `admin` | MotionEye 管理员用户名 |
-| `ADMIN_PASSWORD` | 否 | - | MotionEye 管理员密码 |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
 
 ## ZeroTier 配置指南
