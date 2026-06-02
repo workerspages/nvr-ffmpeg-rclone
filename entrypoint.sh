@@ -118,6 +118,9 @@ EOF
             sed -i '/^netcam_userpass/d' "/etc/motioneye/camera-${i}.conf"
         fi
         
+        # 将摄像头配置加入主配置文件使其生效
+        echo "camera camera-${i}.conf" >> /etc/motioneye/motioneye.conf
+
         HAS_CAMERA=1
     fi
 done
