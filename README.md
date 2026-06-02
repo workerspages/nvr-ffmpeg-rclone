@@ -85,10 +85,10 @@ docker run -d \
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
 | `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于将容器服务暴露到外网） |
-| `CF_ACCESS_HOSTNAME` | 否 | - | 如果使用了 Cloudflare TCP 内网穿透摄像头，填入域（如 camera.xx.com） |
-| `CAMERA_URL` | 推荐 | - | 摄像头 RTSP/MJPEG 流地址（若启用了上方的穿透，请填 `rtsp://127.0.0.1:5554/...`） |
-| `CAMERA_USERNAME` | 否 | - | 摄像头认证用户名 |
-| `CAMERA_PASSWORD` | 否 | - | 摄像头认证密码 |
+| `CF_ACCESS_HOSTNAME_1` | 否 | - | 1号摄像头的 Cloudflare TCP 内网穿透域名（可选支持 _1 到 _9） |
+| `CAMERA_URL_1` | 推荐 | - | 1号摄像头的流地址（若使用了 CF 穿透，填 `rtsp://127.0.0.1:5554/...`，可选支持 _1 到 _9） |
+| `CAMERA_USERNAME_1` | 否 | - | 1号摄像头的认证用户名 |
+| `CAMERA_PASSWORD_1` | 否 | - | 1号摄像头的认证密码 |
 | `RCLONE_CONFIG_BASE64` | 否 | - | `rclone.conf` 文件的 Base64 编码 |
 | `RCLONE_REMOTE` | 否 | `remote:nvr-backup` | Rclone 远程目标路径 |
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
@@ -126,15 +126,20 @@ CLOUDFLARE_TOKEN=ey...（你的Token）
 
 > 部署成功后，`cloudflared` 进程将自动启动并连接至 Cloudflare 边缘节点，你可以直接通过配置的 Public Hostname 域名访问 MotionEye，无需再从 PaaS 映射端口。
 
-### 4. 内网摄像头流接入 (TCP 穿透)
+### 4. 内网摄像头流接入与多摄像头支持
 
 由于 RTSP 是纯 TCP 协议，为了从 PaaS 端安全拉取家里的 RTSP 视频流，可以通过 Cloudflare 的 Access TCP 功能进行隧道打洞：
 
-1. **家庭路由器端**：在家里部署 `cloudflared`，并在 Cloudflare Zero Trust 中添加一个 Public Hostname（如 `camera.yourdomain.com`），服务类型选择 `TCP`，URL 指向你家摄像头的内网地址（如 `localhost:554` 或 `192.168.1.100:554`）。
+1. **家庭路由器端**：在家里部署 `cloudflared`，并在 Cloudflare Zero Trust 中添加一个 Public Hostname（如 `cam1.yourdomain.com`），服务类型选择 `TCP`，URL 指向摄像头的内网地址。
 2. **PaaS 容器端设置环境变量**：
-   - 设置 `CF_ACCESS_HOSTNAME=camera.yourdomain.com`
-   - 设置 `CAMERA_URL=rtsp://127.0.0.1:5554/stream1`（此处 IP 和端口必须固定为 127.0.0.1:5554，路径 `/stream1` 请根据你真实的摄像头路径修改）
-3. **工作原理**：容器启动时，会自动运行 `cloudflared access tcp`，将公网上的 `camera.yourdomain.com` 映射到容器内部的 `127.0.0.1:5554`。随后 MotionEye 就会从这个本地端口拉取 RTSP 流，完美实现打洞！
+   - 设置 `CF_ACCESS_HOSTNAME_1=cam1.yourdomain.com`
+   - 设置 `CAMERA_URL_1=rtsp://127.0.0.1:5554/stream1`
+   - 如果有第二台摄像头，继续设置：
+     - `CF_ACCESS_HOSTNAME_2=cam2.yourdomain.com`
+     - `CAMERA_URL_2=rtsp://127.0.0.1:5555/stream1`
+3. **工作原理**：容器启动时，会自动支持最多 9 个摄像头。对于每个配置了 `CF_ACCESS_HOSTNAME_X` 的摄像头，容器会在后台自动打洞，将域名映射到容器本地的 `5553 + X` 端口（例如 1号端口是 5554，2号是 5555）。然后 MotionEye 自动生成对应的 `camera-X.conf` 并连接这些本地端口。
+
+> 兼容性提示：如果您不带数字后缀，直接配置 `CAMERA_URL` 和 `CF_ACCESS_HOSTNAME`，脚本会默认将其作为 1 号摄像头处理。
 
 ## Rclone 配置指南
 

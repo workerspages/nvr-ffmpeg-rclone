@@ -8,7 +8,7 @@
 
 # ===== 网络摄像头设置 =====
 # 摄像头名称
-camera_name Camera1
+camera_name __CAMERA_NAME__
 
 # 网络摄像头 URL（如果是内网摄像头，可通过 Cloudflare Access 穿透连接）
 netcam_url __CAMERA_URL__
@@ -76,7 +76,7 @@ text_right off
 text_changes off
 
 # ===== 存储路径 =====
-target_dir /var/lib/motioneye/Camera1
+target_dir /var/lib/motioneye/__CAMERA_NAME__
 
 # ===== 流设置 =====
 stream_port 0
