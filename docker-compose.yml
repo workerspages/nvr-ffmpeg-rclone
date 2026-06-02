@@ -13,9 +13,12 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PORT=8080
-      # 替换为你的 Cloudflare Tunnel Token（可选）
+      # 替换为你的 Cloudflare Tunnel Token（如果不需要暴露服务，可不填）
       - CLOUDFLARE_TOKEN=your_cloudflare_tunnel_token
-      # 替换为你的网络摄像头 URL
+      # 如果你在家用 Cloudflare 暴露了摄像头的 TCP 端口，填入你的域名（例如 camera.yourdomain.com）
+      - CF_ACCESS_HOSTNAME=
+      # 如果你设置了 CF_ACCESS_HOSTNAME，请将摄像头 URL 的 IP/域名 改为 127.0.0.1:5554
+      # 否则，请替换为你的网络摄像头真实 URL
       - CAMERA_URL=rtsp://user:pass@10.x.x.x:554/stream
       # Rclone 同步时间间隔（秒），默认 300
       - SYNC_INTERVAL=300

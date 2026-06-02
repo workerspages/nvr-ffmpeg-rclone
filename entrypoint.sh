@@ -10,6 +10,7 @@ echo "======================================"
 # ===== 1. 环境变量默认值 =====
 PORT="${PORT:-8080}"
 CLOUDFLARE_TOKEN="${CLOUDFLARE_TOKEN:-}"
+CF_ACCESS_HOSTNAME="${CF_ACCESS_HOSTNAME:-}"
 CAMERA_URL="${CAMERA_URL:-}"
 CAMERA_USERNAME="${CAMERA_USERNAME:-}"
 CAMERA_PASSWORD="${CAMERA_PASSWORD:-}"
@@ -21,6 +22,7 @@ TZ="${TZ:-Asia/Shanghai}"
 echo "[init] 端口: ${PORT}"
 echo "[init] 时区: ${TZ}"
 echo "[init] Cloudflare: ${CLOUDFLARE_TOKEN:-未配置}"
+echo "[init] CF Access: ${CF_ACCESS_HOSTNAME:-未配置}"
 echo "[init] 摄像头: ${CAMERA_URL:-未配置}"
 echo "[init] Rclone 远程: ${RCLONE_REMOTE}"
 
@@ -55,6 +57,27 @@ EOF
     echo "[init] Cloudflare Tunnel 配置完成"
 else
     echo "[init] 提示: 未设置 CLOUDFLARE_TOKEN，跳过 Cloudflare Tunnel 配置"
+fi
+
+# ===== 3.5 启动 Cloudflare Access TCP (内网穿透) =====
+if [ -n "${CF_ACCESS_HOSTNAME}" ]; then
+    echo "[init] 正在将 Cloudflare Access TCP 加入 supervisor 管理..."
+    cat >> /etc/supervisord.conf <<EOF
+
+[program:cloudflared-access]
+command=/usr/local/bin/cloudflared access tcp --hostname ${CF_ACCESS_HOSTNAME} --url 127.0.0.1:5554
+autostart=true
+autorestart=true
+startsecs=3
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=16
+EOF
+    echo "[init] Cloudflare Access TCP 配置完成，本地已映射至 127.0.0.1:5554"
+    echo "[init] 提示: 如果您使用了 CF_ACCESS_HOSTNAME，您的 CAMERA_URL 应该指向 127.0.0.1:5554 (例如 rtsp://127.0.0.1:5554/stream1)"
 fi
 
 # ===== 4. 动态端口绑定 =====

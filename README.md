@@ -84,8 +84,9 @@ docker run -d \
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
-| `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于暴露服务） |
-| `CAMERA_URL` | 推荐 | - | 摄像头 RTSP/MJPEG 流地址 |
+| `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于将容器服务暴露到外网） |
+| `CF_ACCESS_HOSTNAME` | 否 | - | 如果使用了 Cloudflare TCP 内网穿透摄像头，填入域（如 camera.xx.com） |
+| `CAMERA_URL` | 推荐 | - | 摄像头 RTSP/MJPEG 流地址（若启用了上方的穿透，请填 `rtsp://127.0.0.1:5554/...`） |
 | `CAMERA_USERNAME` | 否 | - | 摄像头认证用户名 |
 | `CAMERA_PASSWORD` | 否 | - | 摄像头认证密码 |
 | `RCLONE_CONFIG_BASE64` | 否 | - | `rclone.conf` 文件的 Base64 编码 |
@@ -125,13 +126,15 @@ CLOUDFLARE_TOKEN=ey...（你的Token）
 
 > 部署成功后，`cloudflared` 进程将自动启动并连接至 Cloudflare 边缘节点，你可以直接通过配置的 Public Hostname 域名访问 MotionEye，无需再从 PaaS 映射端口。
 
-### 4. 内网摄像头流接入
+### 4. 内网摄像头流接入 (TCP 穿透)
 
-如果在家庭网络端，你已经通过 Cloudflare 暴露了摄像头的 HTTP(S)/RTSP 流，可以直接将经过 HTTPS/TCP 包装的 URL 配置到 `CAMERA_URL`，系统将直接拉取：
+由于 RTSP 是纯 TCP 协议，为了从 PaaS 端安全拉取家里的 RTSP 视频流，可以通过 Cloudflare 的 Access TCP 功能进行隧道打洞：
 
-```
-CAMERA_URL=https://camera.yourdomain.com/stream
-```
+1. **家庭路由器端**：在家里部署 `cloudflared`，并在 Cloudflare Zero Trust 中添加一个 Public Hostname（如 `camera.yourdomain.com`），服务类型选择 `TCP`，URL 指向你家摄像头的内网地址（如 `localhost:554` 或 `192.168.1.100:554`）。
+2. **PaaS 容器端设置环境变量**：
+   - 设置 `CF_ACCESS_HOSTNAME=camera.yourdomain.com`
+   - 设置 `CAMERA_URL=rtsp://127.0.0.1:5554/stream1`（此处 IP 和端口必须固定为 127.0.0.1:5554，路径 `/stream1` 请根据你真实的摄像头路径修改）
+3. **工作原理**：容器启动时，会自动运行 `cloudflared access tcp`，将公网上的 `camera.yourdomain.com` 映射到容器内部的 `127.0.0.1:5554`。随后 MotionEye 就会从这个本地端口拉取 RTSP 流，完美实现打洞！
 
 ## Rclone 配置指南
 
