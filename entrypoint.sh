@@ -39,13 +39,21 @@ chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motio
 
 # ===== 3. 启动 ZeroTier（虚拟局域网穿透） =====
 if [ -n "${ZEROTIER_NETWORK_ID}" ]; then
+    echo "[init] 检查虚拟网络设备..."
+    if [ ! -e /dev/net/tun ]; then
+        echo "[init] 尝试创建 /dev/net/tun 设备..."
+        mkdir -p /dev/net
+        mknod /dev/net/tun c 10 200 2>/dev/null || echo "[init] 警告: 创建 /dev/net/tun 失败，如果 ZeroTier 无法工作，请确认平台权限"
+        chmod 666 /dev/net/tun 2>/dev/null || true
+    fi
+
     echo "[init] 启动 ZeroTier 守护进程..."
     zerotier-one -d
 
     # 等待 ZeroTier 服务就绪
     echo "[init] 等待 ZeroTier 服务就绪..."
     RETRY=0
-    MAX_RETRY=30
+    MAX_RETRY=10
     while [ $RETRY -lt $MAX_RETRY ]; do
         if zerotier-cli status 2>/dev/null | grep -q "ONLINE"; then
             break
@@ -64,25 +72,13 @@ if [ -n "${ZEROTIER_NETWORK_ID}" ]; then
     echo "[init] 加入 ZeroTier 网络: ${ZEROTIER_NETWORK_ID}"
     zerotier-cli join "${ZEROTIER_NETWORK_ID}" || echo "[init] 警告: 加入网络失败"
 
-    # 等待获取 IP 地址（最多等待 60 秒）
-    echo "[init] 等待获取 ZeroTier IP 地址..."
-    RETRY=0
-    MAX_RETRY=60
-    while [ $RETRY -lt $MAX_RETRY ]; do
-        ZT_IP=$(zerotier-cli listnetworks 2>/dev/null | grep "${ZEROTIER_NETWORK_ID}" | awk '{print $NF}')
-        if [ -n "${ZT_IP}" ] && [ "${ZT_IP}" != "-" ]; then
-            echo "[init] ZeroTier IP: ${ZT_IP}"
-            break
-        fi
-        RETRY=$((RETRY + 1))
-        sleep 1
-    done
-
-    if [ $RETRY -ge $MAX_RETRY ]; then
-        echo "[init] 警告: 获取 ZeroTier IP 超时"
-        echo "[init] 提示: 请在 ZeroTier Central 中授权此节点"
-        echo "[init] 节点 ID: $(zerotier-cli info 2>/dev/null | awk '{print $3}')"
-    fi
+    # 输出节点信息供用户授权，不阻塞启动过程
+    echo "[init] ==================================================="
+    echo "[init] 您的 ZeroTier 节点 ID 为: $(zerotier-cli info 2>/dev/null | awk '{print $3}')"
+    echo "[init] 请务必前往 ZeroTier Central (https://my.zerotier.com)"
+    echo "[init] 勾选 Auth 授权此节点，否则无法获取 IP 及访问摄像头！"
+    echo "[init] ==================================================="
+    echo "[init] MotionEye 将继续启动，ZeroTier 会在后台尝试连接..."
 else
     echo "[init] 提示: 未设置 ZEROTIER_NETWORK_ID，跳过 ZeroTier 配置"
 fi
