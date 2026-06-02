@@ -13,3 +13,6 @@
 只读/临时文件系统：PaaS 的容器重启后数据会清空。因此，MotionEye 的配置目录 /etc/motioneye 和临时缓存目录 /var/lib/motioneye 必须具备全写权限，且录像必须快速被 Rclone 搬运走。
 
 极度苛刻的内存限制：必须彻底关闭图像解码与移动侦测，完全开启 Passthrough（流直通）。
+
+
+使用github actions自动构建镜像 并保存到 ghcr.io 和 hub.docker.com
