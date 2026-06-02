@@ -8,20 +8,14 @@ services:
     build: .
     container_name: nvr-rclone
     restart: always
-    # 必须开启特权模式和挂载 TUN 设备，ZeroTier 才能工作
-    cap_add:
-      - NET_ADMIN
-      - SYS_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
     ports:
       - "8080:8080"
     environment:
       - TZ=Asia/Shanghai
       - PORT=8080
-      # 替换为你的 ZeroTier Network ID
-      - ZEROTIER_NETWORK_ID=your_16_char_network_id
-      # ZeroTier 网络获取 IP 后，替换为摄像头在 ZeroTier 中的内网 IP
+      # 替换为你的 Cloudflare Tunnel Token（可选）
+      - CLOUDFLARE_TOKEN=your_cloudflare_tunnel_token
+      # 替换为你的网络摄像头 URL
       - CAMERA_URL=rtsp://user:pass@10.x.x.x:554/stream
       # Rclone 同步时间间隔（秒），默认 300
       - SYNC_INTERVAL=300
@@ -32,7 +26,5 @@ services:
       # 将宿主机的 rclone.conf 挂载到容器内
       # 请确保宿主机上有这个文件，并配置好网盘
       - ./rclone_config/rclone.conf:/config/rclone/rclone.conf:ro
-      # 如果你想在宿主机持久化保存 ZeroTier 的节点身份，解除下行注释
-      # - ./zerotier_data:/var/lib/zerotier-one
       # 如果你想在宿主机也保留一份录像文件，解除下行注释
       # - ./media:/var/lib/motioneye

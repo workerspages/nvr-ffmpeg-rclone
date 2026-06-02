@@ -4,7 +4,7 @@
 
 基于 **MotionEye NVR** + **FFmpeg** + **Rclone** 的 Docker 镜像，专为 **1C1G PaaS 平台**（如 Zeabur、Railway、Render、Fly.io）设计。
 
-通过 ZeroTier 穿透连接家庭网络摄像头，实时录制并自动备份到云网盘。
+支持集成 Cloudflare Tunnel 穿透，便于在不支持虚拟网卡的 PaaS 平台中暴露服务并访问内网摄像头，实时录制并自动备份到云网盘。
 
 ## 架构设计
 
@@ -13,7 +13,7 @@
 │           Docker Container (PaaS)           │
 │                                             │
 │  ┌─────────────┐                            │
-│  │  ZeroTier   │  ← 加入家庭网络             │
+│  │ Cloudflare  │  ← Tunnel 内网穿透          │
 │  └──────┬──────┘                            │
 │         │                                   │
 │  ┌──────┴──────┐    ┌──────────────────┐    │
@@ -33,12 +33,12 @@
                ▼
           用户浏览器
 
-家庭摄像头 ──(ZeroTier 穿透)──▶ 容器内 ZeroTier ──▶ MotionEye (RTSP)
+家庭摄像头 ──(Cloudflare 穿透)──▶ 容器内 Tunnel ──▶ MotionEye (RTSP)
 ```
 
 ## 核心特性
 
-- **ZeroTier 内置客户端**：容器启动时自动加入 ZeroTier 网络，直接访问家庭局域网
+- **Cloudflare Tunnel 集成**：支持以无状态隧道方式暴露服务，彻底解决 PaaS 平台缺少 /dev/net/tun 权限的限制
 - **Passthrough 直通模式**：不解码、不重编码，极低 CPU/内存消耗
 - **动态端口绑定**：自动读取 PaaS 注入的 `$PORT` 环境变量
 - **Rclone 自动备份**：定时将录像移动到云网盘，释放本地空间
@@ -62,10 +62,8 @@ docker pull <your-dockerhub-username>/nvr-ffmpeg-rclone:latest
 ```bash
 docker run -d \
   --name nvr \
-  --cap-add NET_ADMIN \
-  --device /dev/net/tun:/dev/net/tun \
   -p 8080:8080 \
-  -e ZEROTIER_NETWORK_ID="your_16_char_network_id" \
+  -e CLOUDFLARE_TOKEN="your_cloudflare_tunnel_token" \
   -e CAMERA_URL="rtsp://user:pass@10.x.x.x:554/stream" \
   -e RCLONE_CONFIG_BASE64="$(cat rclone.conf | base64 -w 0)" \
   -e RCLONE_REMOTE="remote:nvr-backup" \
@@ -86,7 +84,7 @@ docker run -d \
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
-| `ZEROTIER_NETWORK_ID` | 推荐 | - | ZeroTier 网络 ID（16 位十六进制） |
+| `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于暴露服务） |
 | `CAMERA_URL` | 推荐 | - | 摄像头 RTSP/MJPEG 流地址 |
 | `CAMERA_USERNAME` | 否 | - | 摄像头认证用户名 |
 | `CAMERA_PASSWORD` | 否 | - | 摄像头认证密码 |
@@ -95,47 +93,44 @@ docker run -d \
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
 
-## ZeroTier 配置指南
+## Cloudflare Tunnel 配置指南
 
-ZeroTier 用于让 PaaS 容器加入你的家庭虚拟局域网，从而访问家里的摄像头。
+Cloudflare Tunnel (`cloudflared`) 用于在没有公网 IP 且不支持创建虚拟网卡的 PaaS 平台中，安全地将服务暴露出去，或者配合 Cloudflare Access 访问内网资源。
 
-### 1. 获取 Network ID
+### 1. 获取 Cloudflare Token
 
-1. 访问 [ZeroTier Central](https://my.zerotier.com)
-2. 登录你的账号
-3. 点击你的网络（即家里路由器已加入的网络）
-4. 页面顶部的 **Network ID** 就是你需要的 16 位十六进制字符串
+1. 访问 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 控制台。
+2. 导航至 **Networks** -> **Tunnels**。
+3. 点击 **Create a tunnel**，选择 **Cloudflared**。
+4. 命名 Tunnel 并保存。
+5. 在安装环境选项卡中，复制命令中 `--token` 后面的字符串，这就是你的 `CLOUDFLARE_TOKEN`。
 
-示例：`a1b2c3d4e5f67890`
+### 2. 路由配置 (Public Hostname)
 
-### 2. 配置环境变量
+为了能够从外部访问容器的面板，你需要配置路由：
 
-在 PaaS 平台设置：
+1. 在刚刚创建的 Tunnel 中，进入 **Public Hostname** 选项卡。
+2. 点击 **Add a public hostname**。
+3. 填入你想要的子域名和域名。
+4. **Service** 类型选择 `HTTP`，URL 填入 `localhost:8080`。
+5. 保存配置。
 
-```
-ZEROTIER_NETWORK_ID=a1b2c3d4e5f67890
-```
+### 3. 注入环境变量
 
-### 3. 授权新节点
-
-容器首次启动时，ZeroTier 会生成一个新的节点 ID。你需要在 ZeroTier Central 中授权该节点：
-
-1. 启动容器后，查看容器日志，找到 `节点 ID: xxxxxxxxxx`
-2. 在 ZeroTier Central → 你的网络 → Members 列表中，找到该节点
-3. 勾选 **Auth** 复选框授权
-4. 等待几秒，容器将自动获取 ZeroTier IP 地址
-
-> **重要**：PaaS 平台的容器可能不支持 TUN/TAP 设备。如果 ZeroTier 无法工作，你可以考虑：
-> - 使用支持特权容器的 PaaS（如 Fly.io）
-> - 或在 VPS 上直接部署（使用 `docker run --cap-add NET_ADMIN --device /dev/net/tun`）
-
-### 4. 摄像头地址
-
-授权成功后，你的摄像头地址应使用 ZeroTier 分配的内网 IP：
+部署时注入环境变量：
 
 ```
-# 示例：假设摄像头在 ZeroTier 网络中的 IP 是 10.147.17.50
-CAMERA_URL=rtsp://user:pass@10.147.17.50:554/stream
+CLOUDFLARE_TOKEN=ey...（你的Token）
+```
+
+> 部署成功后，`cloudflared` 进程将自动启动并连接至 Cloudflare 边缘节点，你可以直接通过配置的 Public Hostname 域名访问 MotionEye，无需再从 PaaS 映射端口。
+
+### 4. 内网摄像头流接入
+
+如果在家庭网络端，你已经通过 Cloudflare 暴露了摄像头的 HTTP(S)/RTSP 流，可以直接将经过 HTTPS/TCP 包装的 URL 配置到 `CAMERA_URL`，系统将直接拉取：
+
+```
+CAMERA_URL=https://camera.yourdomain.com/stream
 ```
 
 ## Rclone 配置指南
@@ -234,7 +229,7 @@ nvr-ffmpeg-rclone/
 
 1. **内存限制**：本镜像已配置 Passthrough 模式，关闭图像解码和运动检测，但仍建议监控内存使用情况
 2. **录像分片**：默认每 5 分钟生成一个视频文件（`movie_max_time=300`），便于 Rclone 快速搬运
-3. **ZeroTier 网络**：确保 PaaS 容器可以通过 ZeroTier 网络访问家庭摄像头的 RTSP 地址
+3. **内网穿透**：如果摄像头位于家庭内网，请确保其能被处于公网或通过 Cloudflare 隧道连接的 PaaS 容器访问
 4. **重启恢复**：PaaS 容器重启后，未被 Rclone 搬走的录像会丢失。建议将 `SYNC_INTERVAL` 设置为较短的值（如 60 秒）
 
 ## License

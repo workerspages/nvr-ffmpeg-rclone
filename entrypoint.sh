@@ -9,7 +9,7 @@ echo "======================================"
 
 # ===== 1. 环境变量默认值 =====
 PORT="${PORT:-8080}"
-ZEROTIER_NETWORK_ID="${ZEROTIER_NETWORK_ID:-}"
+CLOUDFLARE_TOKEN="${CLOUDFLARE_TOKEN:-}"
 CAMERA_URL="${CAMERA_URL:-}"
 CAMERA_USERNAME="${CAMERA_USERNAME:-}"
 CAMERA_PASSWORD="${CAMERA_PASSWORD:-}"
@@ -20,7 +20,7 @@ TZ="${TZ:-Asia/Shanghai}"
 
 echo "[init] 端口: ${PORT}"
 echo "[init] 时区: ${TZ}"
-echo "[init] ZeroTier: ${ZEROTIER_NETWORK_ID:-未配置}"
+echo "[init] Cloudflare: ${CLOUDFLARE_TOKEN:-未配置}"
 echo "[init] 摄像头: ${CAMERA_URL:-未配置}"
 echo "[init] Rclone 远程: ${RCLONE_REMOTE}"
 
@@ -31,55 +31,30 @@ mkdir -p /var/lib/motioneye
 mkdir -p /var/run/motioneye
 mkdir -p /var/log/motioneye
 mkdir -p /config/rclone
-mkdir -p /var/lib/zerotier-one
 
 # 确保目录可写（PaaS 环境）
-chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motioneye /config/rclone /var/lib/zerotier-one
+chmod -R 777 /etc/motioneye /var/lib/motioneye /var/run/motioneye /var/log/motioneye /config/rclone
 
-# ===== 3. 启动 ZeroTier（虚拟局域网穿透） =====
-if [ -n "${ZEROTIER_NETWORK_ID}" ]; then
-    echo "[init] 检查虚拟网络设备..."
-    if [ ! -e /dev/net/tun ]; then
-        echo "[init] 尝试创建 /dev/net/tun 设备..."
-        mkdir -p /dev/net
-        mknod /dev/net/tun c 10 200 2>/dev/null || echo "[init] 警告: 创建 /dev/net/tun 失败，如果 ZeroTier 无法工作，请确认平台权限"
-        chmod 666 /dev/net/tun 2>/dev/null || true
-    fi
+# ===== 3. 启动 Cloudflare Tunnel (cloudflared) =====
+if [ -n "${CLOUDFLARE_TOKEN}" ]; then
+    echo "[init] 正在将 Cloudflare Tunnel 加入 supervisor 管理..."
+    cat >> /etc/supervisord.conf <<EOF
 
-    echo "[init] 启动 ZeroTier 守护进程..."
-    zerotier-one -d
-
-    # 等待 ZeroTier 服务就绪
-    echo "[init] 等待 ZeroTier 服务就绪..."
-    RETRY=0
-    MAX_RETRY=10
-    while [ $RETRY -lt $MAX_RETRY ]; do
-        if zerotier-cli status 2>/dev/null | grep -q "ONLINE"; then
-            break
-        fi
-        RETRY=$((RETRY + 1))
-        sleep 1
-    done
-
-    if [ $RETRY -ge $MAX_RETRY ]; then
-        echo "[init] 警告: ZeroTier 服务启动超时，继续启动..."
-    else
-        echo "[init] ZeroTier 服务已就绪"
-    fi
-
-    # 加入 ZeroTier 网络
-    echo "[init] 加入 ZeroTier 网络: ${ZEROTIER_NETWORK_ID}"
-    zerotier-cli join "${ZEROTIER_NETWORK_ID}" || echo "[init] 警告: 加入网络失败"
-
-    # 输出节点信息供用户授权，不阻塞启动过程
-    echo "[init] ==================================================="
-    echo "[init] 您的 ZeroTier 节点 ID 为: $(zerotier-cli info 2>/dev/null | awk '{print $3}')"
-    echo "[init] 请务必前往 ZeroTier Central (https://my.zerotier.com)"
-    echo "[init] 勾选 Auth 授权此节点，否则无法获取 IP 及访问摄像头！"
-    echo "[init] ==================================================="
-    echo "[init] MotionEye 将继续启动，ZeroTier 会在后台尝试连接..."
+[program:cloudflared]
+command=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${CLOUDFLARE_TOKEN}
+autostart=true
+autorestart=true
+startsecs=5
+startretries=3
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+priority=15
+EOF
+    echo "[init] Cloudflare Tunnel 配置完成"
 else
-    echo "[init] 提示: 未设置 ZEROTIER_NETWORK_ID，跳过 ZeroTier 配置"
+    echo "[init] 提示: 未设置 CLOUDFLARE_TOKEN，跳过 Cloudflare Tunnel 配置"
 fi
 
 # ===== 4. 动态端口绑定 =====
@@ -120,7 +95,7 @@ else
 fi
 
 # ===== 8. 导出环境变量供子进程使用 =====
-export PORT ZEROTIER_NETWORK_ID CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
+export PORT CLOUDFLARE_TOKEN CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
 
 # ===== 9. 启动 supervisord =====
 echo "[init] 启动服务..."
