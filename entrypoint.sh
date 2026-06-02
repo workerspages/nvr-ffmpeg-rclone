@@ -63,7 +63,7 @@ sed -i "s|^port .*|port ${PORT}|" /etc/motioneye/motioneye.conf
 
 # ===== 6. 摄像头与 TCP 穿透动态配置 (支持多设备) =====
 # 初始化主配置，默认语言设为中文
-echo "# @lang zh-CN" > /etc/motioneye/motion.conf
+echo "# @lang zh" > /etc/motioneye/motion.conf
 
 # 循环处理 CAMERA_URL_1 到 CAMERA_URL_9 (包含没后缀的作为 1)
 HAS_CAMERA=0
