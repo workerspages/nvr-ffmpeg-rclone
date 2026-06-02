@@ -19,6 +19,9 @@ netcam_url __CAMERA_URL__
 # 摄像头认证
 netcam_userpass __CAMERA_USERNAME__:__CAMERA_PASSWORD__
 
+# 强制使用 TCP 传输 RTSP（这对 Cloudflare Tunnel 穿透至关重要，因为不支持 UDP）
+netcam_use_tcp on
+
 # 保持连接（减少重连开销）
 netcam_keepalive on
 
