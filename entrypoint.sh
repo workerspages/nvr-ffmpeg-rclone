@@ -106,7 +106,9 @@ EOF
         echo "[init] [$i] 生成摄像头配置 Camera${i} ..."
         cp /opt/motioneye/thread-1.conf.tmpl "/etc/motioneye/camera-${i}.conf"
 
+        STREAM_PORT=$((8080 + i))
         sed -i "s|__CAMERA_ID__|${i}|g" "/etc/motioneye/camera-${i}.conf"
+        sed -i "s|__STREAM_PORT__|${STREAM_PORT}|g" "/etc/motioneye/camera-${i}.conf"
         sed -i "s|__CAMERA_NAME__|Camera${i}|g" "/etc/motioneye/camera-${i}.conf"
         sed -i "s|__CAMERA_URL__|${URL}|g" "/etc/motioneye/camera-${i}.conf"
         sed -i "s|__CAMERA_USERNAME__|${USER}|g" "/etc/motioneye/camera-${i}.conf"
