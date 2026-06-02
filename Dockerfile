@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     tzdata \
     gnupg \
+    fdisk \
     # Motion 运行依赖
     libmicrohttpd12 \
     v4l-utils \
