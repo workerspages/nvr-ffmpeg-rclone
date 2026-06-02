@@ -94,50 +94,49 @@ docker run -d \
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
 
-## Cloudflare Tunnel 配置指南
+## Cloudflare Tunnel 部署架构与防坑指南
 
-Cloudflare Tunnel (`cloudflared`) 用于在没有公网 IP 且不支持创建虚拟网卡的 PaaS 平台中，安全地将服务暴露出去，或者配合 Cloudflare Access 访问内网资源。
+本系统在 Cloudflare 网络架构中支持**双向内网穿透**。但在使用时，一定要注意区分**“服务端隧道（PaaS端）”**和**“源端隧道（家庭端）”**，切勿将两者的 Token 混用，否则会导致严重的路由回环冲突！
 
-### 1. 获取 Cloudflare Token
+### 架构一：使用 PaaS 自带域名访问面板（推荐，最简单）
 
-1. 访问 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 控制台。
-2. 导航至 **Networks** -> **Tunnels**。
-3. 点击 **Create a tunnel**，选择 **Cloudflared**。
-4. 命名 Tunnel 并保存。
-5. 在安装环境选项卡中，复制命令中 `--token` 后面的字符串，这就是你的 `CLOUDFLARE_TOKEN`。
+如果您的 PaaS 平台（如 Zeabur, Railway 等）已经为您分配了可以访问 `8080` 端口的公网域名，那么您**完全不需要**在云端配置 Cloudflare Tunnel 来暴露面板。
+你只需要配置访问家庭摄像头的单向穿透即可：
 
-### 2. 路由配置 (Public Hostname)
+1. **家庭路由器端**：在家里的设备（如 NAS、路由器）上部署一条 Cloudflare Tunnel（例如命名为 `Home-Camera`）。
+2. **配置家庭端路由**：在 Zero Trust 后台中，为这条隧道添加一个 Public Hostname（如 `cam1.yourdomain.com`），服务类型选择 `TCP`，URL 指向您本地摄像头的内网地址（如 `192.168.31.242:554`）。
+3. **PaaS 容器端（云端）**：在 PaaS 的环境变量中填入以下配置：
+   - **千万不要填写** `CLOUDFLARE_TOKEN`（留空或删除此变量）。脚本会自动跳过云端的 Tunnel 创建。
+   - `CF_ACCESS_HOSTNAME_1=cam1.yourdomain.com`
+   - `CAMERA_URL_1=rtsp://127.0.0.1:5554/stream1`
+4. **效果**：云端容器启动后，会自动通过 Access TCP 去拉取家里的视频流。而您可以通过 PaaS 提供的域名直接访问 Web 页面。
 
-为了能够从外部访问容器的面板，你需要配置路由：
+### 架构二：使用 Cloudflare 域名访问面板（需要两条独立隧道）
 
-1. 在刚刚创建的 Tunnel 中，进入 **Public Hostname** 选项卡。
-2. 点击 **Add a public hostname**。
-3. 填入你想要的子域名和域名。
-4. **Service** 类型选择 `HTTP`，URL 填入 `localhost:8080`。
-5. 保存配置。
+如果您希望通过自己的 Cloudflare 域名（例如 `motioneye.yourdomain.com`）来访问云端面板，那么您必须建立**两条完全独立**的隧道。
 
-### 3. 注入环境变量
+> ⚠️ **高危排雷警告**：绝对不可以在“家庭路由器”和“PaaS 云端容器”中使用同一个 `CLOUDFLARE_TOKEN`！如果共用 Token，Cloudflare 会在家庭和云端之间进行随机负载均衡，导致视频流（TCP）和网页流（HTTP）各有一半概率请求失败（报错 `i/o timeout`）。
 
-部署时注入环境变量：
+#### 第一条隧道：家庭端（只负责推流）
+1. 在 Zero Trust 中新建 Tunnel，例如命名为 `Home-Camera`。
+2. 配置 Public Hostname：`cam1.yourdomain.com` -> `tcp://192.168.31.242:554`。
+3. 获取 **Token A**，并把它部署在与摄像头同一局域网的家庭设备（NAS/路由器）中。
 
-```
-CLOUDFLARE_TOKEN=ey...（你的Token）
-```
+#### 第二条隧道：PaaS 云端（只负责展示面板）
+1. 在 Zero Trust 中新建另一条完全独立的 Tunnel，例如命名为 `Cloud-NVR`。
+2. 配置 Public Hostname：`motioneye.yourdomain.com` -> `http://localhost:8080`。
+3. 获取 **Token B**。
+4. 将 **Token B** 填入 PaaS 环境变量的 `CLOUDFLARE_TOKEN` 中。
+5. 依然在 PaaS 填入拉流环境变量：
+   - `CF_ACCESS_HOSTNAME_1=cam1.yourdomain.com`
+   - `CAMERA_URL_1=rtsp://127.0.0.1:5554/stream1`
 
-> 部署成功后，`cloudflared` 进程将自动启动并连接至 Cloudflare 边缘节点，你可以直接通过配置的 Public Hostname 域名访问 MotionEye，无需再从 PaaS 映射端口。
+### 动态端口打洞与多摄像头支持
 
-### 4. 内网摄像头流接入与多摄像头支持
-
-由于 RTSP 是纯 TCP 协议，为了从 PaaS 端安全拉取家里的 RTSP 视频流，可以通过 Cloudflare 的 Access TCP 功能进行隧道打洞：
-
-1. **家庭路由器端**：在家里部署 `cloudflared`，并在 Cloudflare Zero Trust 中添加一个 Public Hostname（如 `cam1.yourdomain.com`），服务类型选择 `TCP`，URL 指向摄像头的内网地址。
-2. **PaaS 容器端设置环境变量**：
-   - 设置 `CF_ACCESS_HOSTNAME_1=cam1.yourdomain.com`
-   - 设置 `CAMERA_URL_1=rtsp://127.0.0.1:5554/stream1`
-   - 如果有第二台摄像头，继续设置：
-     - `CF_ACCESS_HOSTNAME_2=cam2.yourdomain.com`
-     - `CAMERA_URL_2=rtsp://127.0.0.1:5555/stream1`
-3. **工作原理**：容器启动时，会自动支持最多 9 个摄像头。对于每个配置了 `CF_ACCESS_HOSTNAME_X` 的摄像头，容器会在后台自动打洞，将域名映射到容器本地的 `5553 + X` 端口（例如 1号端口是 5554，2号是 5555）。然后 MotionEye 自动生成对应的 `camera-X.conf` 并连接这些本地端口。
+无论使用上述哪种架构，脚本都支持最多 9 个摄像头自动进行本地 TCP 打洞映射：
+- 1号摄像头 (`CF_ACCESS_HOSTNAME_1`) 会在云端容器内映射至本地 `127.0.0.1:5554` 端口。
+- 2号摄像头 (`CF_ACCESS_HOSTNAME_2`) 会在云端容器内映射至本地 `127.0.0.1:5555` 端口，依此类推。
+MotionEye 将自动读取这些本地映射生成对应的 `.conf` 配置文件。
 
 > 兼容性提示：如果您不带数字后缀，直接配置 `CAMERA_URL` 和 `CF_ACCESS_HOSTNAME`，脚本会默认将其作为 1 号摄像头处理。
 
