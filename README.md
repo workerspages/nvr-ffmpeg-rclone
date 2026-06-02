@@ -238,6 +238,7 @@ nvr-ffmpeg-rclone/
 2. **录像分片**：默认每 5 分钟生成一个视频文件（`movie_max_time=300`），便于 Rclone 快速搬运
 3. **内网穿透**：如果摄像头位于家庭内网，请确保其能被处于公网或通过 Cloudflare 隧道连接的 PaaS 容器访问
 4. **重启恢复**：PaaS 容器重启后，未被 Rclone 搬走的录像会丢失。建议将 `SYNC_INTERVAL` 设置为较短的值（如 60 秒）
+5. **保存1周**：`/motioneye/thread-1.conf.tmpl` 中设置录像保存7天
 
 ## License
 
