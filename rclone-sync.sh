@@ -226,17 +226,24 @@ while true; do
 
     echo "[rclone-sync] 开始同步..."
 
-    # 检查是否有文件需要同步（增强日志）
-    FOUND_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) -mmin +1 2>/dev/null || true)
+    # 使用临时文件记录要同步的文件列表，供 rclone --files-from 使用
+    TMP_FILE_LIST="/tmp/rclone_sync_files.txt"
+    > "${TMP_FILE_LIST}"
+
+    # 切换到媒体目录，使用 find 查找并输出相对路径
+    cd "${MEDIA_PATH}" || continue
+    FOUND_FILES=$(find . -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) -mmin +1 2>/dev/null | sed 's|^\./||' || true)
+    
     if [ -z "${FOUND_FILES}" ]; then
         FILE_COUNT=0
     else
         FILE_COUNT=$(echo "${FOUND_FILES}" | wc -l)
+        echo "${FOUND_FILES}" > "${TMP_FILE_LIST}"
     fi
 
     if [ "${FILE_COUNT}" -eq 0 ]; then
         # 额外诊断：列出所有视频文件（不限 mmin）以帮助排查
-        ALL_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) 2>/dev/null || true)
+        ALL_FILES=$(find . -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) 2>/dev/null || true)
         if [ -z "${ALL_FILES}" ]; then
             ALL_COUNT=0
         else
@@ -277,11 +284,7 @@ while true; do
     echo "[rclone-sync] 执行 rclone move -> ${RCLONE_REMOTE} ..."
     rclone move "${MEDIA_PATH}/" "${RCLONE_REMOTE}/" \
         --config "${RCLONE_CONF}" \
-        --min-age 1m \
-        --include "*.mp4" \
-        --include "*.avi" \
-        --include "*.mkv" \
-        --include "*.mov" \
+        --files-from "${TMP_FILE_LIST}" \
         --delete-empty-src-dirs \
         --transfers 1 \
         --buffer-size 0 \
@@ -291,6 +294,8 @@ while true; do
         --stats 30s \
         -v \
         2>&1 || echo "[rclone-sync] 同步出错，将在下次重试"
+
+    rm -f "${TMP_FILE_LIST}"
 
     echo "[rclone-sync] 同步完成"
 
