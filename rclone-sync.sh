@@ -47,7 +47,7 @@ cleanup_remote_storage() {
     }
 
     local CURRENT_HR
-    CURRENT_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')")
+    CURRENT_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')" 2>/dev/null) || CURRENT_HR="unknown"
     echo "[rclone-cleanup] 远程存储: ${CURRENT_HR}GB / ${MAX_SIZE_GB}GB 上限"
 
     if [ "${CURRENT_BYTES}" -le "${MAX_BYTES}" ]; then
@@ -92,7 +92,7 @@ except Exception as e:
         fi
 
         local FILE_SIZE_HR
-        FILE_SIZE_HR=$(python3 -c "print(f'{${FILE_SIZE}/1048576:.1f}')")
+        FILE_SIZE_HR=$(python3 -c "print(f'{${FILE_SIZE}/1048576:.1f}')" 2>/dev/null) || FILE_SIZE_HR="?"
         echo "[rclone-cleanup] 删除: ${FILE_PATH} (${FILE_SIZE_HR}MB)"
 
         if rclone deletefile --config "${RCLONE_CONF}" "${RCLONE_REMOTE}/${FILE_PATH}" 2>/dev/null; then
@@ -110,9 +110,9 @@ except Exception as e:
     rclone rmdirs --config "${RCLONE_CONF}" "${RCLONE_REMOTE}" --leave-root 2>/dev/null || true
 
     local FREED_HR
-    FREED_HR=$(python3 -c "print(f'{${DELETED_BYTES}/1048576:.1f}')")
+    FREED_HR=$(python3 -c "print(f'{${DELETED_BYTES}/1048576:.1f}')" 2>/dev/null) || FREED_HR="?"
     local REMAIN_HR
-    REMAIN_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')")
+    REMAIN_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')" 2>/dev/null) || REMAIN_HR="?"
     echo "[rclone-cleanup] 清理完成: 删除 ${DELETED_COUNT} 个文件，释放 ${FREED_HR}MB，剩余 ${REMAIN_HR}GB"
 }
 
@@ -139,7 +139,7 @@ while true; do
     if [ "${FILE_COUNT}" -eq 0 ]; then
         echo "[rclone-sync] 没有需要同步的文件，跳过"
         # 即使没有新文件，也执行清理检查（防止之前上传后未来得及清理）
-        cleanup_remote_storage
+        cleanup_remote_storage || echo "[rclone-cleanup] 清理过程出现异常，将在下次重试"
         continue
     fi
 
@@ -165,5 +165,5 @@ while true; do
     echo "[rclone-sync] 同步完成"
 
     # 同步后执行远程存储清理（循环存储）
-    cleanup_remote_storage
+    cleanup_remote_storage || echo "[rclone-cleanup] 清理过程出现异常，将在下次重试"
 done
