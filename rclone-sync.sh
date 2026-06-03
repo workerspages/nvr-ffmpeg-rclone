@@ -7,7 +7,11 @@ set -euo pipefail
 # ===== 配置（通过环境变量覆盖） =====
 RCLONE_REMOTE="${RCLONE_REMOTE:-remote:nvr-backup}"
 SYNC_INTERVAL="${SYNC_INTERVAL:-300}"
-RCLONE_MAX_SIZE="${RCLONE_MAX_SIZE:-0}"
+MAX_SIZE_GB="${RCLONE_MAX_SIZE:-0}"
+# Rclone 会自动读取所有 RCLONE_ 开头的环境变量。RCLONE_MAX_SIZE 会被误认为 --max-size 过滤器参数。
+# 而 --max-size 不能与 --files-from 同时使用，因此在这里将其 unset，避免引发 CRITICAL 错误。
+unset RCLONE_MAX_SIZE
+
 MEDIA_PATH="/var/lib/motioneye"
 RCLONE_CONF="/config/rclone/rclone.conf"
 
@@ -15,8 +19,8 @@ echo "[rclone-sync] 启动 Rclone 定时同步"
 echo "[rclone-sync] 远程目标: ${RCLONE_REMOTE}"
 echo "[rclone-sync] 同步间隔: ${SYNC_INTERVAL}s"
 echo "[rclone-sync] 媒体路径: ${MEDIA_PATH}"
-if [ "${RCLONE_MAX_SIZE}" -gt 0 ] 2>/dev/null; then
-    echo "[rclone-sync] 循环存储: 开启（上限 ${RCLONE_MAX_SIZE}GB）"
+if [ "${MAX_SIZE_GB}" -gt 0 ] 2>/dev/null; then
+    echo "[rclone-sync] 循环存储: 开启（上限 ${MAX_SIZE_GB}GB）"
 else
     echo "[rclone-sync] 循环存储: 未开启（RCLONE_MAX_SIZE 未设置或为 0）"
 fi
@@ -109,7 +113,7 @@ verify_rclone_config() {
 # ===== 远程存储清理函数（循环存储） =====
 # 当远端存储超过阈值时，按修改时间从早到晚逐个删除文件
 cleanup_remote_storage() {
-    local MAX_SIZE_GB="${RCLONE_MAX_SIZE:-0}"
+    # 之前这里是 local MAX_SIZE_GB="${RCLONE_MAX_SIZE:-0}"，现在直接使用全局的 MAX_SIZE_GB
 
     # 如果未配置或设为 0，跳过清理
     if [ "${MAX_SIZE_GB}" -le 0 ] 2>/dev/null; then
