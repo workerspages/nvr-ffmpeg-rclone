@@ -156,7 +156,8 @@ rclone config
 
 - Linux/macOS
 ```bash
-cat ~/.config/rclone/rclone.conf | base64 -w 0
+# 假设 rclone.conf 在默认路径
+base64 -w 0 ~/.config/rclone/rclone.conf
 ```
 
 - Windows
