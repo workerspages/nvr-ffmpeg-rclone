@@ -228,21 +228,29 @@ while true; do
 
     # 检查是否有文件需要同步（增强日志）
     FOUND_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) -mmin +1 2>/dev/null || true)
-    FILE_COUNT=$(echo "${FOUND_FILES}" | grep -c '.' 2>/dev/null || echo "0")
+    if [ -z "${FOUND_FILES}" ]; then
+        FILE_COUNT=0
+    else
+        FILE_COUNT=$(echo "${FOUND_FILES}" | wc -l)
+    fi
 
     if [ "${FILE_COUNT}" -eq 0 ]; then
         # 额外诊断：列出所有视频文件（不限 mmin）以帮助排查
         ALL_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) 2>/dev/null || true)
-        ALL_COUNT=$(echo "${ALL_FILES}" | grep -c '.' 2>/dev/null || echo "0")
+        if [ -z "${ALL_FILES}" ]; then
+            ALL_COUNT=0
+        else
+            ALL_COUNT=$(echo "${ALL_FILES}" | wc -l)
+        fi
         if [ "${ALL_COUNT}" -gt 0 ]; then
             echo "[rclone-sync] 没有满足条件的文件（修改时间 >1 分钟），但发现 ${ALL_COUNT} 个视频文件:"
             echo "${ALL_FILES}" | head -5 | while IFS= read -r f; do
-                local FSIZE FMTIME
                 FSIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
                 FMTIME=$(stat -c%Y "$f" 2>/dev/null || echo "0")
-                local NOW=$(date +%s)
-                local AGE_SEC=$((NOW - FMTIME))
-                echo "[rclone-sync]   ${f} ($(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo '?')MB, ${AGE_SEC}秒前修改)"
+                NOW=$(date +%s)
+                AGE_SEC=$((NOW - FMTIME))
+                FSIZE_HR=$(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo "?")
+                echo "[rclone-sync]   ${f} (${FSIZE_HR}MB, ${AGE_SEC}秒前修改)"
             done
             if [ "${ALL_COUNT}" -gt 5 ]; then
                 echo "[rclone-sync]   ... 还有 $((ALL_COUNT - 5)) 个文件"
@@ -257,9 +265,9 @@ while true; do
 
     echo "[rclone-sync] 发现 ${FILE_COUNT} 个文件待同步:"
     echo "${FOUND_FILES}" | head -5 | while IFS= read -r f; do
-        local FSIZE
         FSIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
-        echo "[rclone-sync]   ${f} ($(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo '?')MB)"
+        FSIZE_HR=$(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo "?")
+        echo "[rclone-sync]   ${f} (${FSIZE_HR}MB)"
     done
     if [ "${FILE_COUNT}" -gt 5 ]; then
         echo "[rclone-sync]   ... 还有 $((FILE_COUNT - 5)) 个文件"
