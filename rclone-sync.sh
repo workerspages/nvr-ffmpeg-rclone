@@ -21,6 +21,91 @@ else
     echo "[rclone-sync] 循环存储: 未开启（RCLONE_MAX_SIZE 未设置或为 0）"
 fi
 
+# ===== Rclone 配置诊断函数 =====
+# 启动时运行，逐项检查配置文件、远程连通性、写入权限
+verify_rclone_config() {
+    echo "[rclone-check] ========================================"
+    echo "[rclone-check]   Rclone 配置诊断"
+    echo "[rclone-check] ========================================"
+
+    # 1. 配置文件存在性
+    if [ ! -f "${RCLONE_CONF}" ]; then
+        echo "[rclone-check] ✗ 配置文件不存在: ${RCLONE_CONF}"
+        return 1
+    fi
+    echo "[rclone-check] ✓ 配置文件: ${RCLONE_CONF}"
+
+    # 2. 列出所有已配置的远程
+    echo "[rclone-check] --- 已配置的远程 ---"
+    local REMOTES
+    REMOTES=$(rclone listremotes --config "${RCLONE_CONF}" 2>&1) || {
+        echo "[rclone-check] ✗ 无法解析 rclone.conf，文件可能损坏"
+        echo "[rclone-check]   错误: ${REMOTES}"
+        return 1
+    }
+    if [ -z "${REMOTES}" ]; then
+        echo "[rclone-check] ✗ rclone.conf 中没有定义任何远程"
+        return 1
+    fi
+    echo "${REMOTES}" | while IFS= read -r r; do
+        echo "[rclone-check]   • ${r}"
+    done
+
+    # 3. 检查目标远程是否存在于配置中
+    local REMOTE_NAME="${RCLONE_REMOTE%%:*}"
+    if ! echo "${REMOTES}" | grep -q "^${REMOTE_NAME}:$"; then
+        echo "[rclone-check] ✗ 目标远程 '${REMOTE_NAME}' 未在 rclone.conf 中定义！"
+        echo "[rclone-check]   当前 RCLONE_REMOTE=${RCLONE_REMOTE}"
+        echo "[rclone-check]   可用的远程: ${REMOTES}"
+        return 1
+    fi
+    echo "[rclone-check] ✓ 目标远程 '${REMOTE_NAME}' 已在配置中"
+
+    # 4. 测试远程连通性
+    echo "[rclone-check] --- 测试连通性 ---"
+    local CONN_OUTPUT
+    CONN_OUTPUT=$(rclone lsd --config "${RCLONE_CONF}" "${REMOTE_NAME}:" --max-depth 1 2>&1) || true
+    if [ -n "${CONN_OUTPUT}" ]; then
+        echo "${CONN_OUTPUT}" | head -10 | while IFS= read -r line; do
+            echo "[rclone-check]   ${line}"
+        done
+    else
+        echo "[rclone-check]   （远程根目录为空，这是正常的）"
+    fi
+    echo "[rclone-check] ✓ 远程连通性正常"
+
+    # 5. 测试写入权限（创建测试文件然后删除）
+    echo "[rclone-check] --- 测试写入权限 ---"
+    local TEST_FILE=".rclone-write-test-$(date +%s)"
+    local WRITE_OUTPUT
+    WRITE_OUTPUT=$(echo "rclone-write-test" | rclone rcat --config "${RCLONE_CONF}" "${RCLONE_REMOTE}/${TEST_FILE}" 2>&1) || {
+        echo "[rclone-check] ✗ 写入测试失败！"
+        echo "[rclone-check]   目标: ${RCLONE_REMOTE}/${TEST_FILE}"
+        echo "[rclone-check]   错误: ${WRITE_OUTPUT}"
+        echo "[rclone-check]   请检查远程权限、API 配额或网络连接"
+        return 1
+    }
+    echo "[rclone-check] ✓ 写入测试成功"
+    # 清理测试文件
+    rclone deletefile --config "${RCLONE_CONF}" "${RCLONE_REMOTE}/${TEST_FILE}" 2>/dev/null || true
+    echo "[rclone-check] ✓ 测试文件已清理"
+
+    # 6. 显示远程存储信息
+    echo "[rclone-check] --- 远程存储信息 ---"
+    local ABOUT_OUTPUT
+    ABOUT_OUTPUT=$(rclone about --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>&1) || true
+    if [ -n "${ABOUT_OUTPUT}" ]; then
+        echo "${ABOUT_OUTPUT}" | while IFS= read -r line; do
+            echo "[rclone-check]   ${line}"
+        done
+    fi
+
+    echo "[rclone-check] ========================================"
+    echo "[rclone-check]   诊断结果: 全部通过 ✓"
+    echo "[rclone-check] ========================================"
+    return 0
+}
+
 # ===== 远程存储清理函数（循环存储） =====
 # 当远端存储超过阈值时，按修改时间从早到晚逐个删除文件
 cleanup_remote_storage() {
@@ -116,6 +201,7 @@ except Exception as e:
     echo "[rclone-cleanup] 清理完成: 删除 ${DELETED_COUNT} 个文件，释放 ${FREED_HR}MB，剩余 ${REMAIN_HR}GB"
 }
 
+# ===== 启动检查 =====
 # 检查 rclone.conf 是否存在
 if [ ! -f "${RCLONE_CONF}" ]; then
     echo "[rclone-sync] 警告: rclone.conf 不存在 (${RCLONE_CONF})"
@@ -126,6 +212,13 @@ if [ ! -f "${RCLONE_CONF}" ]; then
     done
 fi
 
+# 运行 Rclone 配置诊断
+if ! verify_rclone_config; then
+    echo "[rclone-sync] ✗ Rclone 配置诊断未通过！同步功能可能无法正常工作"
+    echo "[rclone-sync] 请检查以上诊断日志修复问题后重启容器"
+    echo "[rclone-sync] 脚本将继续运行但同步可能失败..."
+fi
+
 # 主循环：定时同步
 while true; do
     # 等待指定间隔
@@ -133,19 +226,47 @@ while true; do
 
     echo "[rclone-sync] 开始同步..."
 
-    # 检查是否有文件需要同步
-    FILE_COUNT=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) -mmin +1 2>/dev/null | wc -l)
+    # 检查是否有文件需要同步（增强日志）
+    FOUND_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) -mmin +1 2>/dev/null || true)
+    FILE_COUNT=$(echo "${FOUND_FILES}" | grep -c '.' 2>/dev/null || echo "0")
 
     if [ "${FILE_COUNT}" -eq 0 ]; then
-        echo "[rclone-sync] 没有需要同步的文件，跳过"
-        # 即使没有新文件，也执行清理检查（防止之前上传后未来得及清理）
+        # 额外诊断：列出所有视频文件（不限 mmin）以帮助排查
+        ALL_FILES=$(find "${MEDIA_PATH}" -type f \( -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov" \) 2>/dev/null || true)
+        ALL_COUNT=$(echo "${ALL_FILES}" | grep -c '.' 2>/dev/null || echo "0")
+        if [ "${ALL_COUNT}" -gt 0 ]; then
+            echo "[rclone-sync] 没有满足条件的文件（修改时间 >1 分钟），但发现 ${ALL_COUNT} 个视频文件:"
+            echo "${ALL_FILES}" | head -5 | while IFS= read -r f; do
+                local FSIZE FMTIME
+                FSIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
+                FMTIME=$(stat -c%Y "$f" 2>/dev/null || echo "0")
+                local NOW=$(date +%s)
+                local AGE_SEC=$((NOW - FMTIME))
+                echo "[rclone-sync]   ${f} ($(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo '?')MB, ${AGE_SEC}秒前修改)"
+            done
+            if [ "${ALL_COUNT}" -gt 5 ]; then
+                echo "[rclone-sync]   ... 还有 $((ALL_COUNT - 5)) 个文件"
+            fi
+        else
+            echo "[rclone-sync] 没有需要同步的文件，跳过"
+        fi
+        # 即使没有新文件，也执行清理检查
         cleanup_remote_storage || echo "[rclone-cleanup] 清理过程出现异常，将在下次重试"
         continue
     fi
 
-    echo "[rclone-sync] 发现 ${FILE_COUNT} 个文件待同步"
+    echo "[rclone-sync] 发现 ${FILE_COUNT} 个文件待同步:"
+    echo "${FOUND_FILES}" | head -5 | while IFS= read -r f; do
+        local FSIZE
+        FSIZE=$(stat -c%s "$f" 2>/dev/null || echo "?")
+        echo "[rclone-sync]   ${f} ($(python3 -c "print(f'{${FSIZE}/1048576:.1f}')" 2>/dev/null || echo '?')MB)"
+    done
+    if [ "${FILE_COUNT}" -gt 5 ]; then
+        echo "[rclone-sync]   ... 还有 $((FILE_COUNT - 5)) 个文件"
+    fi
 
     # 使用 rclone move 移动文件到远程（移动后本地删除，节省空间）
+    echo "[rclone-sync] 执行 rclone move -> ${RCLONE_REMOTE} ..."
     rclone move "${MEDIA_PATH}/" "${RCLONE_REMOTE}/" \
         --config "${RCLONE_CONF}" \
         --min-age 1m \
@@ -159,6 +280,7 @@ while true; do
         --low-level-retries 3 \
         --retries 3 \
         --stats-one-line \
+        --stats 30s \
         -v \
         2>&1 || echo "[rclone-sync] 同步出错，将在下次重试"
 
