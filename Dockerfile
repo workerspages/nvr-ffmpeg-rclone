@@ -16,7 +16,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PORT=8080 \
     CLOUDFLARE_TOKEN= \
     RCLONE_REMOTE=remote:nvr-backup \
-    SYNC_INTERVAL=300
+    SYNC_INTERVAL=300 \
+    RCLONE_MAX_SIZE=10
 
 # ===== 安装系统依赖 =====
 RUN apt-get update && apt-get install -y --no-install-recommends \

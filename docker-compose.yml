@@ -25,6 +25,8 @@ services:
       # - CAMERA_URL_2=rtsp://127.0.0.1:5555/stream
       # Rclone 同步时间间隔（秒），默认 300
       - SYNC_INTERVAL=300
+      # 远程网盘存储上限（GB），超过后自动删除最早文件，0=不限制
+      - RCLONE_MAX_SIZE=10
       # Rclone 远程目标
       - RCLONE_REMOTE=remote:nvr-backup
       # 注意：RCLONE_CONFIG_BASE64 这里不需要配置，我们使用本地挂载的方式

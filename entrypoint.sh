@@ -143,7 +143,7 @@ else
 fi
 
 # ===== 8. 导出环境变量供子进程使用 =====
-export PORT CLOUDFLARE_TOKEN CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL TZ
+export PORT CLOUDFLARE_TOKEN CAMERA_URL RCLONE_REMOTE SYNC_INTERVAL RCLONE_MAX_SIZE TZ
 
 # ===== 9. 启动 supervisord =====
 echo "[init] 启动服务..."

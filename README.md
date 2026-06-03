@@ -92,6 +92,7 @@ docker run -d \
 | `RCLONE_CONFIG_BASE64` | 否 | - | `rclone.conf` 文件的 Base64 编码 |
 | `RCLONE_REMOTE` | 否 | `remote:nvr-backup` | Rclone 远程目标路径 |
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
+| `RCLONE_MAX_SIZE` | 否 | `10` | 远程网盘存储上限（GB），超过后自动删除最早文件。设为 `0` 关闭循环清理 |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
 
 ## Cloudflare Tunnel 部署架构与防坑指南
@@ -248,6 +249,7 @@ nvr-ffmpeg-rclone/
 3. **内网穿透**：如果摄像头位于家庭内网，请确保其能被处于公网或通过 Cloudflare 隧道连接的 PaaS 容器访问
 4. **重启恢复**：PaaS 容器重启后，未被 Rclone 搬走的录像会丢失。建议将 `SYNC_INTERVAL` 设置为较短的值（如 60 秒）
 5. **保存1周**：`/motioneye/thread-1.conf.tmpl` 中设置录像保存7天
+6. **循环存储**：当 `RCLONE_MAX_SIZE` 大于 0 时，每次同步后脚本会检查远程网盘占用，超限时自动按日期删除最早的录像文件。例如 Google Drive 免费 15GB 空间，建议设为 `10`，预留 5GB 缓冲
 
 ## License
 
