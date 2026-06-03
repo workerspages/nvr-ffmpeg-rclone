@@ -154,9 +154,17 @@ rclone config
 
 ### 2. 编码为 Base64
 
+- Linux/macOS
 ```bash
-# Linux/macOS
 cat ~/.config/rclone/rclone.conf | base64 -w 0
+```
+
+- Windows
+```bash
+# 假设 rclone.conf 在默认的 AppData 路径
+$configPath = "$env:APPDATA\rclone\rclone.conf"
+[Convert]::ToBase64String([IO.File]::ReadAllBytes($configPath))
+```
 
 # 将输出的字符串设置为 RCLONE_CONFIG_BASE64 环境变量
 ```
