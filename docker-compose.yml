@@ -11,30 +11,23 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - TZ=Asia/Shanghai
-      - PORT=8080
-      # 替换为你的 Cloudflare Tunnel Token（如果不需要暴露服务，可不填）
-      - CLOUDFLARE_TOKEN=your_cloudflare_tunnel_token
-      # 如果你在家用 Cloudflare 暴露了摄像头的 TCP 端口，填入你的域名（例如 camera.yourdomain.com）
-      - CF_ACCESS_HOSTNAME_1=
-      # 如果你设置了 CF_ACCESS_HOSTNAME_1，请将摄像头 URL 的 IP/域名 改为 127.0.0.1:5554
-      # 否则，请替换为你的网络摄像头真实 URL
-      - CAMERA_URL_1=rtsp://user:pass@10.x.x.x:554/stream
-      # (可选) Moonfire NVR Web UI 必须依赖低码率的 sub 流(子流)来进行快速预览播放。
-      # 如果你的摄像头支持同时输出低码率流，请填在这里（例如通道2）。若不填，则系统会默认使用主流作为子流（会产生双倍录像空间占用）。
-      - CAMERA_SUB_URL_1=rtsp://user:pass@10.x.x.x:554/stream2
-      # 支持添加第 2 个摄像头：
-      # - CF_ACCESS_HOSTNAME_2=
-      # - CAMERA_URL_2=rtsp://127.0.0.1:5555/stream
-      # Moonfire NVR 每个摄像头的本地保留空间（GB），默认 2GB
-      - MOONFIRE_RETENTION_GB=2
-      # Rclone 同步时间间隔（秒），默认 300
-      - SYNC_INTERVAL=300
-      # 远程网盘存储上限（GB），超过后自动删除最早文件，0=不限制
-      - RCLONE_MAX_SIZE=10
-      # Rclone 远程目标
-      - RCLONE_REMOTE=remote:nvr-backup
-      # 注意：RCLONE_CONFIG_BASE64 这里不需要配置，我们使用本地挂载的方式
+      - TZ=${TZ:-Asia/Shanghai}
+      - PORT=${PORT:-8080}
+      - CLOUDFLARE_TOKEN=${CLOUDFLARE_TOKEN:-}
+      - CF_ACCESS_HOSTNAME_1=${CF_ACCESS_HOSTNAME_1:-}
+      - CAMERA_URL_1=${CAMERA_URL_1:-rtsp://user:pass@10.x.x.x:554/stream}
+      - CAMERA_SUB_URL_1=${CAMERA_SUB_URL_1:-}
+      - CAMERA_USERNAME_1=${CAMERA_USERNAME_1:-}
+      - CAMERA_PASSWORD_1=${CAMERA_PASSWORD_1:-}
+      - CF_ACCESS_HOSTNAME_2=${CF_ACCESS_HOSTNAME_2:-}
+      - CAMERA_URL_2=${CAMERA_URL_2:-}
+      - CAMERA_SUB_URL_2=${CAMERA_SUB_URL_2:-}
+      - CAMERA_USERNAME_2=${CAMERA_USERNAME_2:-}
+      - CAMERA_PASSWORD_2=${CAMERA_PASSWORD_2:-}
+      - MOONFIRE_RETENTION_GB=${MOONFIRE_RETENTION_GB:-2}
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-300}
+      - RCLONE_MAX_SIZE=${RCLONE_MAX_SIZE:-10}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-remote:nvr-backup}
     volumes:
       # 持久化 Moonfire NVR 数据（数据库 + 录像缓存）
       - moonfire-data:/var/lib/moonfire-nvr
