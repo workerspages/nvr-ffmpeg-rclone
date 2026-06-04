@@ -45,13 +45,74 @@ ownUidIsPrivileged = true
 EOF
 echo "[init] 配置文件已写入 /etc/moonfire-nvr.toml"
 
-# ===== 4. 初始化 Moonfire NVR 数据库（仅首次启动） =====
+# ===== 4. 初始化 Moonfire NVR 数据库与摄像头配置 =====
 if [ ! -f /var/lib/moonfire-nvr/db/db ]; then
     echo "[init] 首次启动，初始化 Moonfire NVR 数据库..."
     moonfire-nvr init
     echo "[init] 数据库初始化完成"
 else
     echo "[init] 数据库已存在，跳过初始化"
+fi
+
+# 检查是否需要配置摄像头
+EXISTING_CAMERAS=$(sqlite3 /var/lib/moonfire-nvr/db/db "SELECT count(*) FROM camera;" 2>/dev/null || echo "0")
+
+if [ "${EXISTING_CAMERAS}" = "0" ]; then
+    echo "[init] 未检测到已配置的摄像头，开始自动配置 (通过 SQLite)..."
+
+    # 4a. 添加存储目录
+    echo "[init] 添加存储目录..."
+    RETENTION_BYTES=$(awk "BEGIN { printf \"%.0f\", ${MOONFIRE_RETENTION_GB} * 1073741824 }")
+    DIR_CONFIG="{\"path\": \"/var/lib/moonfire-nvr/sample\", \"retainBytes\": ${RETENTION_BYTES}, \"gcOnCheck\": true}"
+    sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO sample_file_dir (uuid, config) VALUES (randomblob(16), '${DIR_CONFIG}');"
+    DIR_ID=$(sqlite3 /var/lib/moonfire-nvr/db/db "SELECT id FROM sample_file_dir LIMIT 1;")
+    
+    if [ -n "${DIR_ID}" ]; then
+        echo "[init] 存储目录添加成功，ID: ${DIR_ID}"
+
+        # 4b. 循环添加摄像头
+        HAS_CAMERA=0
+        for i in {1..9}; do
+            VAR_URL="CAMERA_URL_${i}"
+            URL="${!VAR_URL:-}"
+            VAR_USER="CAMERA_USERNAME_${i}"
+            CAM_USER="${!VAR_USER:-}"
+            VAR_PASS="CAMERA_PASSWORD_${i}"
+            CAM_PASS="${!VAR_PASS:-}"
+
+            if [ "$i" -eq 1 ]; then
+                URL="${URL:-${CAMERA_URL:-}}"
+                CAM_USER="${CAM_USER:-${CAMERA_USERNAME:-}}"
+                CAM_PASS="${CAM_PASS:-${CAMERA_PASSWORD:-}}"
+            fi
+
+            if [ -n "${URL}" ]; then
+                echo "[init] [$i] 注册摄像头 Camera${i}..."
+
+                # 将认证信息直接拼接入 URL
+                if [ -n "${CAM_USER}" ] && [ -n "${CAM_PASS}" ] && [[ "${URL}" != *"@"* ]]; then
+                    URL=$(echo "${URL}" | sed -e "s|^rtsp://|rtsp://${CAM_USER}:${CAM_PASS}@|")
+                fi
+
+                # 插入摄像头
+                sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO camera (uuid, short_name, config) VALUES (randomblob(16), 'Camera${i}', '{}');"
+                CAM_ID=$(sqlite3 /var/lib/moonfire-nvr/db/db "SELECT id FROM camera WHERE short_name='Camera${i}';")
+
+                # 插入主流
+                STREAM_CONFIG="{\"rtspUrl\": \"${URL}\", \"record\": true}"
+                sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO stream (camera_id, sample_file_dir_id, type, config, cum_recordings, cum_media_duration_90k, cum_runs) VALUES (${CAM_ID}, ${DIR_ID}, 'main', '${STREAM_CONFIG}', 0, 0, 0);"
+                
+                echo "[init] [$i] Camera${i} 注册成功"
+                HAS_CAMERA=1
+            fi
+        done
+
+        if [ "$HAS_CAMERA" -eq 0 ]; then
+            echo "[init] 警告: 未设置任何 CAMERA_URL"
+        fi
+    fi
+else
+    echo "[init] 已检测到 ${EXISTING_CAMERAS} 个摄像头配置，跳过自动配置"
 fi
 
 # ===== 5. 启动 Cloudflare Tunnel (cloudflared) =====
@@ -125,112 +186,6 @@ echo "======================================"
 # 启动 supervisord 并后台运行
 /usr/bin/supervisord -c /etc/supervisord.conf &
 SUPERVISORD_PID=$!
-
-# ===== 10. 等待 Moonfire NVR 就绪后自动配置摄像头 =====
-echo "[init] 等待 Moonfire NVR 启动..."
-RETRIES=0
-MAX_RETRIES=30
-while ! curl -sf "http://127.0.0.1:${PORT}/api/" -H "Accept: application/json" > /dev/null 2>&1; do
-    RETRIES=$((RETRIES + 1))
-    if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
-        echo "[init] 错误: Moonfire NVR 启动超时（${MAX_RETRIES}s），请检查日志"
-        wait $SUPERVISORD_PID
-        exit 1
-    fi
-    sleep 1
-done
-echo "[init] Moonfire NVR 已就绪"
-
-# 检查是否需要初始化配置（通过 API 检查是否已有摄像头）
-EXISTING_CAMERAS=$(curl -sf "http://127.0.0.1:${PORT}/api/" -H "Accept: application/json" | jq -r '.cameras | length' 2>/dev/null || echo "0")
-
-if [ "${EXISTING_CAMERAS}" = "0" ]; then
-    echo "[init] 未检测到已配置的摄像头，开始自动配置..."
-
-    # 通过 Unix socket（特权模式）操作 API
-    SOCK="/var/lib/moonfire-nvr/sock"
-
-    # 10a. 添加存储目录
-    echo "[init] 添加存储目录..."
-    RETENTION_BYTES=$(awk "BEGIN { printf \"%.0f\", ${MOONFIRE_RETENTION_GB} * 1073741824 }")
-    curl -sf --unix-socket "${SOCK}" "http://localhost/api/dirs" \
-        -H "Content-Type: application/json" \
-        -d "{\"path\": \"/var/lib/moonfire-nvr/sample\", \"retainBytes\": ${RETENTION_BYTES}, \"gcOnCheck\": true}" \
-        -X POST > /dev/null 2>&1 && echo "[init] 存储目录添加成功" || echo "[init] 存储目录可能已存在，跳过"
-
-    # 获取存储目录 ID
-    DIR_ID=$(curl -sf --unix-socket "${SOCK}" "http://localhost/api/" -H "Accept: application/json" \
-        | jq -r '.sampleFileDirs | to_entries | .[0].key // empty' 2>/dev/null || echo "")
-
-    if [ -z "${DIR_ID}" ]; then
-        echo "[init] 警告: 无法获取存储目录 ID，摄像头将需要手动配置"
-    else
-        echo "[init] 存储目录 ID: ${DIR_ID}"
-
-        # 10b. 循环添加摄像头
-        HAS_CAMERA=0
-        for i in {1..9}; do
-            VAR_URL="CAMERA_URL_${i}"
-            URL="${!VAR_URL:-}"
-            VAR_USER="CAMERA_USERNAME_${i}"
-            CAM_USER="${!VAR_USER:-}"
-            VAR_PASS="CAMERA_PASSWORD_${i}"
-            CAM_PASS="${!VAR_PASS:-}"
-
-            if [ "$i" -eq 1 ]; then
-                URL="${URL:-${CAMERA_URL:-}}"
-                CAM_USER="${CAM_USER:-${CAMERA_USERNAME:-}}"
-                CAM_PASS="${CAM_PASS:-${CAMERA_PASSWORD:-}}"
-            fi
-
-            if [ -n "${URL}" ]; then
-                echo "[init] [$i] 注册摄像头 Camera${i}..."
-
-                # 构建 RTSP URL（如有用户名密码则嵌入）
-                FULL_URL="${URL}"
-
-                # 创建摄像头并配置主流
-                CAMERA_JSON=$(jq -n \
-                    --arg name "Camera${i}" \
-                    --arg url "${FULL_URL}" \
-                    --arg user "${CAM_USER}" \
-                    --arg pass "${CAM_PASS}" \
-                    --arg dirId "${DIR_ID}" \
-                    --argjson retain "${RETENTION_BYTES}" \
-                    '{
-                        "shortName": $name,
-                        "description": "",
-                        "onvifBaseUrl": "",
-                        "username": $user,
-                        "password": $pass,
-                        "streams": {
-                            "main": {
-                                "rtspUrl": $url,
-                                "sampleFileDirId": ($dirId | tonumber),
-                                "retainBytes": $retain,
-                                "record": true
-                            }
-                        }
-                    }')
-
-                RESULT=$(curl -sf --unix-socket "${SOCK}" "http://localhost/api/cameras" \
-                    -H "Content-Type: application/json" \
-                    -d "${CAMERA_JSON}" \
-                    -X POST 2>&1) && \
-                    echo "[init] [$i] Camera${i} 注册成功" || \
-                    echo "[init] [$i] Camera${i} 注册失败: ${RESULT}"
-
-                HAS_CAMERA=1
-            fi
-        done
-
-        if [ "$HAS_CAMERA" -eq 0 ]; then
-            echo "[init] 警告: 未设置任何 CAMERA_URL，请在 Moonfire NVR Web UI 中手动添加摄像头"
-        fi
-    fi
-else
-    echo "[init] 已检测到 ${EXISTING_CAMERAS} 个摄像头配置，跳过自动配置"
-fi
 
 echo "[init] 所有服务已启动"
 echo "======================================"
