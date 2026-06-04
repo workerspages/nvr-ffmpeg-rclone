@@ -23,6 +23,8 @@ services:
       # 支持添加第 2 个摄像头：
       # - CF_ACCESS_HOSTNAME_2=
       # - CAMERA_URL_2=rtsp://127.0.0.1:5555/stream
+      # Moonfire NVR 每个摄像头的本地保留空间（GB），默认 2GB
+      - MOONFIRE_RETENTION_GB=2
       # Rclone 同步时间间隔（秒），默认 300
       - SYNC_INTERVAL=300
       # 远程网盘存储上限（GB），超过后自动删除最早文件，0=不限制
@@ -31,8 +33,11 @@ services:
       - RCLONE_REMOTE=remote:nvr-backup
       # 注意：RCLONE_CONFIG_BASE64 这里不需要配置，我们使用本地挂载的方式
     volumes:
+      # 持久化 Moonfire NVR 数据（数据库 + 录像缓存）
+      - moonfire-data:/var/lib/moonfire-nvr
       # 将宿主机的 rclone.conf 挂载到容器内
       # 请确保宿主机上有这个文件，并配置好网盘
       - ./rclone_config/rclone.conf:/config/rclone/rclone.conf:ro
-      # 如果你想在宿主机也保留一份录像文件，解除下行注释
-      # - ./media:/var/lib/motioneye
+
+volumes:
+  moonfire-data:

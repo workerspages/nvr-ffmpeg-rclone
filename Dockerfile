@@ -1,14 +1,14 @@
 # ==============================================================================
 # NVR-FFmpeg-Rclone Docker 镜像
-# 基于 MotionEye NVR + Rclone 云备份
+# 基于 Moonfire NVR + Rclone 云备份
 # 适用于 1C1G PaaS 平台，支持 linux/amd64 和 linux/arm64
 # ==============================================================================
 
-FROM python:3.11-slim-bookworm
+FROM debian:bookworm-slim
 
 LABEL maintainer="workerspages"
 LABEL org.opencontainers.image.source="https://github.com/workerspages/nvr-ffmpeg-rclone"
-LABEL org.opencontainers.image.description="MotionEye NVR + FFmpeg + Rclone for PaaS platforms"
+LABEL org.opencontainers.image.description="Moonfire NVR + FFmpeg + Rclone for PaaS platforms"
 
 # ===== 环境变量 =====
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -17,12 +17,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CLOUDFLARE_TOKEN= \
     RCLONE_REMOTE=remote:nvr-backup \
     SYNC_INTERVAL=300 \
-    RCLONE_MAX_SIZE=10
+    RCLONE_MAX_SIZE=10 \
+    MOONFIRE_RETENTION_GB=2
+
+# ===== Moonfire NVR 版本 =====
+ARG MOONFIRE_VERSION=v0.7.31
 
 # ===== 安装系统依赖 =====
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Motion 守护进程（MotionEye 底层引擎）
-    motion \
     # FFmpeg（视频处理）
     ffmpeg \
     # Supervisor（进程管理）
@@ -32,11 +34,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     tzdata \
     gnupg \
-    fdisk \
-    # Motion 运行依赖
-    libmicrohttpd12 \
-    v4l-utils \
+    # JSON 处理（用于 API 交互脚本）
+    jq \
+    # SQLite（调试用）
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
+
+# ===== 安装 Moonfire NVR（静态链接二进制，零依赖） =====
+RUN ARCH=$(uname -m) && \
+    echo "下载 Moonfire NVR ${MOONFIRE_VERSION} for ${ARCH}..." && \
+    curl -sSL "https://github.com/scottlamb/moonfire-nvr/releases/download/${MOONFIRE_VERSION}/moonfire-nvr-${MOONFIRE_VERSION}-${ARCH}" \
+      -o /usr/local/bin/moonfire-nvr && \
+    chmod +x /usr/local/bin/moonfire-nvr && \
+    moonfire-nvr --version
 
 # ===== 安装 Cloudflare Tunnel (cloudflared) =====
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -49,33 +59,21 @@ RUN ARCH=$(dpkg --print-architecture) && \
     fi && \
     chmod +x /usr/local/bin/cloudflared
 
-# ===== 安装 MotionEye =====
-RUN pip install --no-cache-dir --break-system-packages \
-    motioneye==0.43.1b1
-
 # ===== 安装 Rclone（自动适配架构） =====
 RUN curl -sSL https://rclone.org/install.sh | bash
 
 # ===== 创建目录结构并设置权限 =====
 RUN mkdir -p \
-    /etc/motioneye \
-    /var/lib/motioneye \
-    /var/run/motioneye \
-    /var/log/motioneye \
+    /var/lib/moonfire-nvr/db \
+    /var/lib/moonfire-nvr/sample \
+    /tmp/nvr-export \
     /config/rclone \
-    /opt/motioneye \
     && chmod -R 777 \
-    /etc/motioneye \
-    /var/lib/motioneye \
-    /var/run/motioneye \
-    /var/log/motioneye \
+    /var/lib/moonfire-nvr \
+    /tmp/nvr-export \
     /config/rclone
 
 # ===== 复制配置文件 =====
-# MotionEye 配置模板
-COPY motioneye/motioneye.conf /opt/motioneye/motioneye.conf
-COPY motioneye/thread-1.conf.tmpl /opt/motioneye/thread-1.conf.tmpl
-
 # Supervisord 配置
 COPY supervisord.conf /etc/supervisord.conf
 
