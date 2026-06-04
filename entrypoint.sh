@@ -37,7 +37,8 @@ echo "[init] 生成 Moonfire NVR 配置..."
 cat > /etc/moonfire-nvr.toml <<EOF
 [[binds]]
 ipv4 = "0.0.0.0:${PORT}"
-allowUnauthenticatedPermissions = { viewVideo = true }
+# 出于安全考虑，移除无限制访问权限，强制要求登录
+# allowUnauthenticatedPermissions = { viewVideo = true }
 
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
@@ -206,11 +207,42 @@ fi
 # ===== 8. 导出环境变量供子进程使用 =====
 export PORT CLOUDFLARE_TOKEN RCLONE_REMOTE SYNC_INTERVAL RCLONE_MAX_SIZE TZ MOONFIRE_RETENTION_GB
 
-# ===== 9. 启动 supervisord（Moonfire NVR + Rclone + Cloudflare） =====
-echo "[init] 启动服务..."
-echo "======================================"
+# ===== 9. 启动进程管理 (Supervisor) =====
+echo "[init] 启动 Supervisord..."
 
-# 启动 supervisord 并后台运行
+# 后台等待 Moonfire NVR 启动并初始化管理员用户
+(
+    echo "[init] 等待 Moonfire NVR 服务就绪以初始化管理员..."
+    # 等待 UNIX Socket 创建
+    for i in {1..30}; do
+        if [ -S /var/lib/moonfire-nvr/sock ]; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [ -S /var/lib/moonfire-nvr/sock ]; then
+        # 检查是否已有用户
+        USERS=$(curl -s --unix-socket /var/lib/moonfire-nvr/sock http://localhost/api/users/)
+        if [[ "$USERS" == *"\"users\":[]"* ]]; then
+            ADMIN_USER="${NVR_ADMIN_USER:-admin}"
+            ADMIN_PASS="${NVR_ADMIN_PASSWORD:-admin}"
+            echo "[init] 未检测到任何用户，正在创建初始管理员: ${ADMIN_USER} ..."
+            
+            # 通过高权限的 UNIX socket 调用 API 创建管理员
+            curl -s --unix-socket /var/lib/moonfire-nvr/sock -X POST http://localhost/api/users/ \
+                -d "{\"user\": {\"username\": \"${ADMIN_USER}\", \"password\": \"${ADMIN_PASS}\", \"permissions\": {\"adminUsers\": true, \"viewVideo\": true, \"readCameraConfigs\": true, \"updateSignals\": true}}}" \
+                -H "Content-Type: application/json" > /dev/null
+            
+            echo "[init] 管理员创建成功！请使用 ${ADMIN_USER} 登录。建议在登录后修改默认密码。"
+        else
+            echo "[init] 系统已存在用户，跳过管理员初始化。"
+        fi
+    else
+        echo "[init] 警告: 未能连接到 Moonfire NVR Socket，跳过用户初始化。"
+    fi
+) &
+
 /usr/bin/supervisord -c /etc/supervisord.conf &
 SUPERVISORD_PID=$!
 

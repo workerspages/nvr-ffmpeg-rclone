@@ -88,6 +88,8 @@ docker run -d \
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
 | `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于将容器服务暴露到外网） |
+| `NVR_ADMIN_USER` | 否 | `admin` | Web UI 的初始管理员用户名。系统首次启动未检测到用户时将自动创建此账号。 |
+| `NVR_ADMIN_PASSWORD` | 否 | `admin` | Web UI 的初始管理员登录密码。 |
 | `CF_ACCESS_HOSTNAME_1` | 否 | - | 1号摄像头的 Cloudflare TCP 内网穿透域名（支持 `_1` 到 `_9`。也可省略后缀直接使用 `CF_ACCESS_HOSTNAME` 作为1号配置） |
 | `CAMERA_URL_1` | 推荐 | - | 1号摄像头的主流 RTSP 地址（若使用了 CF 穿透，填 `rtsp://127.0.0.1:5554/...`，支持 `_1` 到 `_9`。也可省略后缀） |
 | `CAMERA_SUB_URL_1` | 否 | 主流 | 1号摄像头的子流 RTSP 地址（Moonfire WebUI 播放必须，留空则默认使用主流地址，支持 `_1` 到 `_9`。也可省略后缀） |
