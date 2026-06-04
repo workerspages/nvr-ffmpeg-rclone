@@ -88,10 +88,11 @@ docker run -d \
 |--------|:----:|--------|------|
 | `PORT` | 否 | `8080` | HTTP 监听端口（PaaS 平台自动注入） |
 | `CLOUDFLARE_TOKEN` | 否 | - | Cloudflare Tunnel Token（用于将容器服务暴露到外网） |
-| `CF_ACCESS_HOSTNAME_1` | 否 | - | 1号摄像头的 Cloudflare TCP 内网穿透域名（可选支持 _1 到 _9） |
-| `CAMERA_URL_1` | 推荐 | - | 1号摄像头的 RTSP 流地址（若使用了 CF 穿透，填 `rtsp://127.0.0.1:5554/...`，可选支持 _1 到 _9） |
-| `CAMERA_USERNAME_1` | 否 | - | 1号摄像头的认证用户名 |
-| `CAMERA_PASSWORD_1` | 否 | - | 1号摄像头的认证密码 |
+| `CF_ACCESS_HOSTNAME_1` | 否 | - | 1号摄像头的 Cloudflare TCP 内网穿透域名（支持 `_1` 到 `_9`。也可省略后缀直接使用 `CF_ACCESS_HOSTNAME` 作为1号配置） |
+| `CAMERA_URL_1` | 推荐 | - | 1号摄像头的主流 RTSP 地址（若使用了 CF 穿透，填 `rtsp://127.0.0.1:5554/...`，支持 `_1` 到 `_9`。也可省略后缀） |
+| `CAMERA_SUB_URL_1` | 否 | 主流 | 1号摄像头的子流 RTSP 地址（Moonfire WebUI 播放必须，留空则默认使用主流地址，支持 `_1` 到 `_9`。也可省略后缀） |
+| `CAMERA_USERNAME_1` | 否 | - | 1号摄像头的认证用户名（支持 `_1` 到 `_9`。也可省略后缀） |
+| `CAMERA_PASSWORD_1` | 否 | - | 1号摄像头的认证密码（支持 `_1` 到 `_9`。也可省略后缀） |
 | `MOONFIRE_RETENTION_GB` | 否 | `2` | 每个摄像头的本地录像缓存空间（GB），超出后自动覆盖最旧录像 |
 | `RCLONE_CONFIG_BASE64` | 否 | - | `rclone.conf` 文件的 Base64 编码 |
 | `RCLONE_REMOTE` | 否 | `remote:nvr-backup` | Rclone 远程目标路径 |
