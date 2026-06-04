@@ -63,7 +63,7 @@ if [ "${EXISTING_CAMERAS}" = "0" ]; then
     # 4a. 添加存储目录
     echo "[init] 添加存储目录..."
     RETENTION_BYTES=$(awk "BEGIN { printf \"%.0f\", ${MOONFIRE_RETENTION_GB} * 1073741824 }")
-    DIR_CONFIG="{\"path\": \"/var/lib/moonfire-nvr/sample\", \"retainBytes\": ${RETENTION_BYTES}, \"gcOnCheck\": true}"
+    DIR_CONFIG="{\"path\": \"/var/lib/moonfire-nvr/sample\", \"gcOnCheck\": true}"
     sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO sample_file_dir (uuid, config) VALUES (randomblob(16), '${DIR_CONFIG}');"
     DIR_ID=$(sqlite3 /var/lib/moonfire-nvr/db/db "SELECT id FROM sample_file_dir LIMIT 1;")
     
@@ -89,17 +89,25 @@ if [ "${EXISTING_CAMERAS}" = "0" ]; then
             if [ -n "${URL}" ]; then
                 echo "[init] [$i] 注册摄像头 Camera${i}..."
 
-                # 将认证信息直接拼接入 URL
-                if [ -n "${CAM_USER}" ] && [ -n "${CAM_PASS}" ] && [[ "${URL}" != *"@"* ]]; then
-                    URL=$(echo "${URL}" | sed -e "s|^rtsp://|rtsp://${CAM_USER}:${CAM_PASS}@|")
+                # 如果 URL 中自带认证信息，提取并从 URL 中剥离（Moonfire NVR 要求 URL 中不能包含鉴权信息）
+                if [[ "${URL}" =~ ^rtsp://([^:]+):([^@]+)@(.*)$ ]]; then
+                    if [ -z "${CAM_USER}" ]; then CAM_USER="${BASH_REMATCH[1]}"; fi
+                    if [ -z "${CAM_PASS}" ]; then CAM_PASS="${BASH_REMATCH[2]}"; fi
+                    URL="rtsp://${BASH_REMATCH[3]}"
+                fi
+
+                # 构建 Camera 配置 JSON (包含 username 和 password)
+                CAMERA_CONFIG="{}"
+                if [ -n "${CAM_USER}" ] || [ -n "${CAM_PASS}" ]; then
+                    CAMERA_CONFIG=$(jq -n -c --arg u "${CAM_USER}" --arg p "${CAM_PASS}" '{username: $u, password: $p}')
                 fi
 
                 # 插入摄像头
-                sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO camera (uuid, short_name, config) VALUES (randomblob(16), 'Camera${i}', '{}');"
+                sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO camera (uuid, short_name, config) VALUES (randomblob(16), 'Camera${i}', '${CAMERA_CONFIG}');"
                 CAM_ID=$(sqlite3 /var/lib/moonfire-nvr/db/db "SELECT id FROM camera WHERE short_name='Camera${i}';")
 
-                # 插入主流
-                STREAM_CONFIG="{\"rtspUrl\": \"${URL}\", \"record\": true}"
+                # 插入主流 (注意：v0.7.31 配置键名为 url，模式为 "record")
+                STREAM_CONFIG=$(jq -n -c --arg url "${URL}" --argjson ret "${RETENTION_BYTES}" '{url: $url, mode: "record", retainBytes: $ret}')
                 sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO stream (camera_id, sample_file_dir_id, type, config, cum_recordings, cum_media_duration_90k, cum_runs) VALUES (${CAM_ID}, ${DIR_ID}, 'main', '${STREAM_CONFIG}', 0, 0, 0);"
                 
                 # 获取并插入子流 (Moonfire UI 要求必须有子流录像才能播放)
@@ -113,12 +121,12 @@ if [ "${EXISTING_CAMERAS}" = "0" ]; then
                     echo "[init] [$i] 未提供子流 URL (CAMERA_SUB_URL_${i})，默认使用主流作为子流"
                     SUB_URL="${URL}"
                 else
-                    if [ -n "${CAM_USER}" ] && [ -n "${CAM_PASS}" ] && [[ "${SUB_URL}" != *"@"* ]]; then
-                        SUB_URL=$(echo "${SUB_URL}" | sed -e "s|^rtsp://|rtsp://${CAM_USER}:${CAM_PASS}@|")
+                    if [[ "${SUB_URL}" =~ ^rtsp://([^:]+):([^@]+)@(.*)$ ]]; then
+                        SUB_URL="rtsp://${BASH_REMATCH[3]}"
                     fi
                 fi
 
-                SUB_STREAM_CONFIG="{\"rtspUrl\": \"${SUB_URL}\", \"record\": true}"
+                SUB_STREAM_CONFIG=$(jq -n -c --arg url "${SUB_URL}" --argjson ret "${RETENTION_BYTES}" '{url: $url, mode: "record", retainBytes: $ret}')
                 sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO stream (camera_id, sample_file_dir_id, type, config, cum_recordings, cum_media_duration_90k, cum_runs) VALUES (${CAM_ID}, ${DIR_ID}, 'sub', '${SUB_STREAM_CONFIG}', 0, 0, 0);"
                 
                 echo "[init] [$i] Camera${i} 注册成功 (主/子流均已配置)"
