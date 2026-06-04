@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     # SQLite（调试用）
     sqlite3 \
+    # CA 证书，用于 curl 下载
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # ===== 安装 Moonfire NVR（静态链接二进制，零依赖） =====
