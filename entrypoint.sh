@@ -37,7 +37,7 @@ echo "[init] 生成 Moonfire NVR 配置..."
 cat > /etc/moonfire-nvr.toml <<EOF
 [[binds]]
 ipv4 = "0.0.0.0:${PORT}"
-allowUnauthenticatedPermissions = { viewVideo = true, viewVideoGridScreenshots = true }
+allowUnauthenticatedPermissions = { viewVideo = true }
 
 [[binds]]
 unix = "/var/lib/moonfire-nvr/sock"
