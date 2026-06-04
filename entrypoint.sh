@@ -102,7 +102,26 @@ if [ "${EXISTING_CAMERAS}" = "0" ]; then
                 STREAM_CONFIG="{\"rtspUrl\": \"${URL}\", \"record\": true}"
                 sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO stream (camera_id, sample_file_dir_id, type, config, cum_recordings, cum_media_duration_90k, cum_runs) VALUES (${CAM_ID}, ${DIR_ID}, 'main', '${STREAM_CONFIG}', 0, 0, 0);"
                 
-                echo "[init] [$i] Camera${i} 注册成功"
+                # 获取并插入子流 (Moonfire UI 要求必须有子流录像才能播放)
+                VAR_SUB_URL="CAMERA_SUB_URL_${i}"
+                SUB_URL="${!VAR_SUB_URL:-}"
+                if [ "$i" -eq 1 ]; then
+                    SUB_URL="${SUB_URL:-${CAMERA_SUB_URL:-}}"
+                fi
+
+                if [ -z "${SUB_URL}" ]; then
+                    echo "[init] [$i] 未提供子流 URL (CAMERA_SUB_URL_${i})，默认使用主流作为子流"
+                    SUB_URL="${URL}"
+                else
+                    if [ -n "${CAM_USER}" ] && [ -n "${CAM_PASS}" ] && [[ "${SUB_URL}" != *"@"* ]]; then
+                        SUB_URL=$(echo "${SUB_URL}" | sed -e "s|^rtsp://|rtsp://${CAM_USER}:${CAM_PASS}@|")
+                    fi
+                fi
+
+                SUB_STREAM_CONFIG="{\"rtspUrl\": \"${SUB_URL}\", \"record\": true}"
+                sqlite3 /var/lib/moonfire-nvr/db/db "INSERT INTO stream (camera_id, sample_file_dir_id, type, config, cum_recordings, cum_media_duration_90k, cum_runs) VALUES (${CAM_ID}, ${DIR_ID}, 'sub', '${SUB_STREAM_CONFIG}', 0, 0, 0);"
+                
+                echo "[init] [$i] Camera${i} 注册成功 (主/子流均已配置)"
                 HAS_CAMERA=1
             fi
         done

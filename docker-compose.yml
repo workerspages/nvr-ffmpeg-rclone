@@ -20,6 +20,9 @@ services:
       # 如果你设置了 CF_ACCESS_HOSTNAME_1，请将摄像头 URL 的 IP/域名 改为 127.0.0.1:5554
       # 否则，请替换为你的网络摄像头真实 URL
       - CAMERA_URL_1=rtsp://user:pass@10.x.x.x:554/stream
+      # (可选) Moonfire NVR Web UI 必须依赖低码率的 sub 流(子流)来进行快速预览播放。
+      # 如果你的摄像头支持同时输出低码率流，请填在这里（例如通道2）。若不填，则系统会默认使用主流作为子流（会产生双倍录像空间占用）。
+      - CAMERA_SUB_URL_1=rtsp://user:pass@10.x.x.x:554/stream2
       # 支持添加第 2 个摄像头：
       # - CF_ACCESS_HOSTNAME_2=
       # - CAMERA_URL_2=rtsp://127.0.0.1:5555/stream
