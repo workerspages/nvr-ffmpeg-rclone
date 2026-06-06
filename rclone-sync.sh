@@ -377,7 +377,7 @@ while true; do
     fi
 
     # ★ 上传前先清空一次网盘回收站（避免死循环：满了无法上传 -> 无法执行到后续的清理逻辑）
-    local REMOTE_NAME="${RCLONE_REMOTE%%:*}"
+    REMOTE_NAME="${RCLONE_REMOTE%%:*}"
     rclone cleanup --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>/dev/null || true
 
     # 使用 rclone move 移动文件到远程（移动后本地删除，节省空间）
