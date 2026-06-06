@@ -14,6 +14,7 @@ unset RCLONE_MAX_SIZE
 
 MEDIA_PATH="/var/lib/motioneye"
 RCLONE_CONF="/config/rclone/rclone.conf"
+BARK_URL="${BARK_URL:-}"
 
 echo "[rclone-sync] 启动 Rclone 定时同步"
 echo "[rclone-sync] 远程目标: ${RCLONE_REMOTE}"
@@ -24,6 +25,23 @@ if [ "${MAX_SIZE_GB}" -gt 0 ] 2>/dev/null; then
 else
     echo "[rclone-sync] 循环存储: 未开启（RCLONE_MAX_SIZE 未设置或为 0）"
 fi
+if [ -n "${BARK_URL}" ]; then
+    echo "[rclone-sync] Bark 通知: 已开启"
+else
+    echo "[rclone-sync] Bark 通知: 未开启（BARK_URL 未设置）"
+fi
+
+# ===== Bark 推送通知函数 =====
+# 仅在 BARK_URL 已配置时发送，失败不影响主流程
+send_bark() {
+    local TITLE="$1"
+    local BODY="${2:-}"
+    if [ -z "${BARK_URL}" ]; then
+        return 0
+    fi
+    curl -sf -o /dev/null --max-time 10 \
+        "${BARK_URL}/${TITLE}/${BODY}" 2>/dev/null || true
+}
 
 # ===== Rclone 配置诊断函数 =====
 # 启动时运行，逐项检查配置文件、远程连通性、写入权限
@@ -301,7 +319,13 @@ while true; do
         --stats-one-line \
         --stats 30s \
         -v \
-        2>&1 || echo "[rclone-sync] 同步出错，将在下次重试"
+        2>&1
+    SYNC_EXIT=$?
+
+    if [ "${SYNC_EXIT}" -ne 0 ]; then
+        echo "[rclone-sync] 同步出错（退出码: ${SYNC_EXIT}），将在下次重试"
+        send_bark "NVR同步失败" "rclone move 退出码${SYNC_EXIT}，共${FILE_COUNT}个文件未能上传"
+    fi
 
     rm -f "${TMP_FILE_LIST}"
 

@@ -93,6 +93,7 @@ docker run -d \
 | `RCLONE_REMOTE` | 否 | `remote:nvr-backup` | Rclone 远程目标路径 |
 | `SYNC_INTERVAL` | 否 | `300` | Rclone 同步间隔（秒） |
 | `RCLONE_MAX_SIZE` | 否 | `10` | 远程网盘存储上限（GB），超过后自动删除最早文件。设为 `0` 关闭循环清理 |
+| `BARK_URL` | 否 | - | Bark 推送通知地址（如 `https://api.day.app/YOUR_KEY`），上传失败时发送通知 |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
 
 ## Cloudflare Tunnel 部署架构与防坑指南
