@@ -43,6 +43,57 @@ send_bark() {
         "${BARK_URL}/${TITLE}/${BODY}" 2>/dev/null || true
 }
 
+# ===== 摄像头连通性检查 =====
+# 使用 ffprobe 探测摄像头流，断联时发送 Bark 通知
+# 30 分钟冷却时间避免重复告警
+CAMERA_ALERT_COOLDOWN=1800
+
+check_cameras() {
+    if [ -z "${BARK_URL}" ]; then
+        return 0
+    fi
+
+    for i in {1..9}; do
+        local VAR_URL="CAMERA_URL_${i}"
+        local URL="${!VAR_URL:-}"
+
+        # 兼容无后缀的旧变量
+        if [ "$i" -eq 1 ]; then
+            URL="${URL:-${CAMERA_URL:-}}"
+        fi
+
+        if [ -z "${URL}" ]; then
+            continue
+        fi
+
+        local ALERT_FILE="/tmp/camera_alert_${i}"
+
+        # 检查冷却时间
+        if [ -f "${ALERT_FILE}" ]; then
+            local LAST_ALERT
+            LAST_ALERT=$(cat "${ALERT_FILE}" 2>/dev/null || echo "0")
+            local NOW
+            NOW=$(date +%s)
+            if [ $((NOW - LAST_ALERT)) -lt ${CAMERA_ALERT_COOLDOWN} ]; then
+                continue
+            fi
+        fi
+
+        # 使用 ffprobe 探测，10 秒超时
+        if ! timeout 10 ffprobe -v quiet -rtsp_transport tcp -i "${URL}" 2>/dev/null; then
+            echo "[camera-check] ✗ Camera${i} 连接失败: ${URL}"
+            send_bark "摄像头${i}断联" "Camera${i}无法连接"
+            date +%s > "${ALERT_FILE}"
+        else
+            # 恢复连接，清除告警状态
+            if [ -f "${ALERT_FILE}" ]; then
+                echo "[camera-check] ✓ Camera${i} 已恢复连接"
+                rm -f "${ALERT_FILE}"
+            fi
+        fi
+    done
+}
+
 # ===== Rclone 配置诊断函数 =====
 # 启动时运行，逐项检查配置文件、远程连通性、写入权限
 verify_rclone_config() {
@@ -251,6 +302,9 @@ while true; do
     sleep "${SYNC_INTERVAL}"
 
     echo "[rclone-sync] 开始同步..."
+
+    # 检查摄像头连通性
+    check_cameras
 
     # 使用临时文件记录要同步的文件列表，供 rclone --files-from 使用
     TMP_FILE_LIST="/tmp/rclone_sync_files.txt"
