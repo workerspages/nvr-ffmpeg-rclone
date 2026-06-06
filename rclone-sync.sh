@@ -79,10 +79,26 @@ check_cameras() {
             fi
         fi
 
-        # 使用 ffprobe 探测，10 秒超时
-        if ! timeout 10 ffprobe -v quiet -rtsp_transport tcp -i "${URL}" 2>/dev/null; then
-            echo "[camera-check] ✗ Camera${i} 连接失败: ${URL}"
-            send_bark "摄像头${i}断联" "Camera${i}无法连接"
+        # 使用 ffprobe 探测，10 秒超时，连续失败 3 次才告警（避免路由器重启等短暂断连误报）
+        local FAIL_COUNT=0
+        local MAX_RETRIES=3
+        local RETRY_WAIT=30
+
+        for attempt in $(seq 1 ${MAX_RETRIES}); do
+            if timeout 10 ffprobe -v quiet -rtsp_transport tcp -i "${URL}" 2>/dev/null; then
+                FAIL_COUNT=0
+                break
+            fi
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+            if [ "${FAIL_COUNT}" -lt "${MAX_RETRIES}" ]; then
+                echo "[camera-check] Camera${i} 第${attempt}次探测失败，${RETRY_WAIT}秒后重试..."
+                sleep ${RETRY_WAIT}
+            fi
+        done
+
+        if [ "${FAIL_COUNT}" -ge "${MAX_RETRIES}" ]; then
+            echo "[camera-check] ✗ Camera${i} 连续${MAX_RETRIES}次连接失败: ${URL}"
+            send_bark "摄像头${i}断联" "Camera${i}连续${MAX_RETRIES}次无法连接"
             date +%s > "${ALERT_FILE}"
         else
             # 恢复连接，清除告警状态
