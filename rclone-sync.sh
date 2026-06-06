@@ -376,8 +376,13 @@ while true; do
         echo "[rclone-sync]   ... 还有 $((FILE_COUNT - 5)) 个文件"
     fi
 
+    # ★ 上传前先清空一次网盘回收站（避免死循环：满了无法上传 -> 无法执行到后续的清理逻辑）
+    local REMOTE_NAME="${RCLONE_REMOTE%%:*}"
+    rclone cleanup --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>/dev/null || true
+
     # 使用 rclone move 移动文件到远程（移动后本地删除，节省空间）
     echo "[rclone-sync] 执行 rclone move -> ${RCLONE_REMOTE} ..."
+    SYNC_EXIT=0
     rclone move "${MEDIA_PATH}/" "${RCLONE_REMOTE}/" \
         --config "${RCLONE_CONF}" \
         --files-from "${TMP_FILE_LIST}" \
@@ -389,8 +394,7 @@ while true; do
         --stats-one-line \
         --stats 30s \
         -v \
-        2>&1
-    SYNC_EXIT=$?
+        2>&1 || SYNC_EXIT=$?
 
     if [ "${SYNC_EXIT}" -ne 0 ]; then
         echo "[rclone-sync] 同步出错（退出码: ${SYNC_EXIT}），将在下次重试"
