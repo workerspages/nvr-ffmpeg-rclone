@@ -112,32 +112,62 @@ verify_rclone_config() {
 
 # ===== 远程存储清理函数（循环存储） =====
 # 当远端存储超过阈值时，按修改时间从早到晚逐个删除文件
+# 使用 rclone about 获取整个网盘的实际使用量（包括回收站等），而非只看 nvr-backup 文件夹
 cleanup_remote_storage() {
-    # 之前这里是 local MAX_SIZE_GB="${RCLONE_MAX_SIZE:-0}"，现在直接使用全局的 MAX_SIZE_GB
-
     # 如果未配置或设为 0，跳过清理
     if [ "${MAX_SIZE_GB}" -le 0 ] 2>/dev/null; then
         return 0
     fi
 
     local MAX_BYTES=$((MAX_SIZE_GB * 1073741824))
+    local REMOTE_NAME="${RCLONE_REMOTE%%:*}"
 
-    # 获取远程存储当前大小
-    local SIZE_JSON
-    SIZE_JSON=$(rclone size --json --config "${RCLONE_CONF}" "${RCLONE_REMOTE}" 2>/dev/null) || {
-        echo "[rclone-cleanup] 无法获取远程存储大小，跳过清理"
-        return 0
+    # 首先清空回收站，因为回收站中的文件也占用 Google Drive 空间
+    echo "[rclone-cleanup] 清空远程回收站..."
+    rclone cleanup --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>/dev/null || true
+
+    # 使用 rclone about 获取整个网盘的实际使用量（含回收站、其他文件夹等）
+    local ABOUT_JSON
+    ABOUT_JSON=$(rclone about --json --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>/dev/null) || {
+        echo "[rclone-cleanup] 无法获取网盘使用量(about)，回退到文件夹大小检查"
+        # 回退方案：只检查 nvr-backup 文件夹
+        ABOUT_JSON=""
     }
 
-    local CURRENT_BYTES
-    CURRENT_BYTES=$(echo "${SIZE_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bytes', 0))" 2>/dev/null) || {
-        echo "[rclone-cleanup] 解析远程存储大小失败，跳过清理"
-        return 0
-    }
+    local CURRENT_BYTES=0
+    local TOTAL_BYTES=0
+    local USE_ABOUT=false
+
+    if [ -n "${ABOUT_JSON}" ]; then
+        CURRENT_BYTES=$(echo "${ABOUT_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('used', 0))" 2>/dev/null) || CURRENT_BYTES=0
+        TOTAL_BYTES=$(echo "${ABOUT_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total', 0))" 2>/dev/null) || TOTAL_BYTES=0
+        if [ "${CURRENT_BYTES}" -gt 0 ]; then
+            USE_ABOUT=true
+        fi
+    fi
+
+    # 如果 about 未能获取使用量，回退到 rclone size
+    if [ "${USE_ABOUT}" = false ]; then
+        local SIZE_JSON
+        SIZE_JSON=$(rclone size --json --config "${RCLONE_CONF}" "${RCLONE_REMOTE}" 2>/dev/null) || {
+            echo "[rclone-cleanup] 无法获取远程存储大小，跳过清理"
+            return 0
+        }
+        CURRENT_BYTES=$(echo "${SIZE_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bytes', 0))" 2>/dev/null) || {
+            echo "[rclone-cleanup] 解析远程存储大小失败，跳过清理"
+            return 0
+        }
+    fi
 
     local CURRENT_HR
     CURRENT_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')" 2>/dev/null) || CURRENT_HR="unknown"
-    echo "[rclone-cleanup] 远程存储: ${CURRENT_HR}GB / ${MAX_SIZE_GB}GB 上限"
+    if [ "${USE_ABOUT}" = true ]; then
+        local TOTAL_HR
+        TOTAL_HR=$(python3 -c "print(f'{${TOTAL_BYTES}/1073741824:.1f}')" 2>/dev/null) || TOTAL_HR="?"
+        echo "[rclone-cleanup] 网盘实际使用: ${CURRENT_HR}GB / ${TOTAL_HR}GB 总容量（上限设置: ${MAX_SIZE_GB}GB）"
+    else
+        echo "[rclone-cleanup] nvr-backup 文件夹: ${CURRENT_HR}GB / ${MAX_SIZE_GB}GB 上限"
+    fi
 
     if [ "${CURRENT_BYTES}" -le "${MAX_BYTES}" ]; then
         echo "[rclone-cleanup] 存储空间充足，无需清理"
@@ -146,7 +176,7 @@ cleanup_remote_storage() {
 
     echo "[rclone-cleanup] 存储超限，开始清理最早的文件..."
 
-    # 列出所有文件并按修改时间排序（最早的在前），输出格式：SIZE\tPATH
+    # 列出 nvr-backup 中所有文件并按修改时间排序（最早的在前），输出格式：SIZE\tPATH
     local TMPFILE="/tmp/rclone_cleanup_list.txt"
     rclone lsjson -R --files-only --config "${RCLONE_CONF}" "${RCLONE_REMOTE}" 2>/dev/null | \
         python3 -c "
@@ -184,7 +214,8 @@ except Exception as e:
         FILE_SIZE_HR=$(python3 -c "print(f'{${FILE_SIZE}/1048576:.1f}')" 2>/dev/null) || FILE_SIZE_HR="?"
         echo "[rclone-cleanup] 删除: ${FILE_PATH} (${FILE_SIZE_HR}MB)"
 
-        if rclone deletefile --config "${RCLONE_CONF}" "${RCLONE_REMOTE}/${FILE_PATH}" 2>/dev/null; then
+        # 使用 --drive-use-trash=false 直接永久删除，不进回收站
+        if rclone deletefile --config "${RCLONE_CONF}" --drive-use-trash=false "${RCLONE_REMOTE}/${FILE_PATH}" 2>/dev/null; then
             CURRENT_BYTES=$((CURRENT_BYTES - FILE_SIZE))
             DELETED_BYTES=$((DELETED_BYTES + FILE_SIZE))
             DELETED_COUNT=$((DELETED_COUNT + 1))
@@ -198,11 +229,14 @@ except Exception as e:
     # 清理远端空目录
     rclone rmdirs --config "${RCLONE_CONF}" "${RCLONE_REMOTE}" --leave-root 2>/dev/null || true
 
+    # 再次清空回收站，确保刚删除的文件不会留在回收站中占用空间
+    rclone cleanup --config "${RCLONE_CONF}" "${REMOTE_NAME}:" 2>/dev/null || true
+
     local FREED_HR
     FREED_HR=$(python3 -c "print(f'{${DELETED_BYTES}/1048576:.1f}')" 2>/dev/null) || FREED_HR="?"
     local REMAIN_HR
     REMAIN_HR=$(python3 -c "print(f'{${CURRENT_BYTES}/1073741824:.2f}')" 2>/dev/null) || REMAIN_HR="?"
-    echo "[rclone-cleanup] 清理完成: 删除 ${DELETED_COUNT} 个文件，释放 ${FREED_HR}MB，剩余 ${REMAIN_HR}GB"
+    echo "[rclone-cleanup] 清理完成: 删除 ${DELETED_COUNT} 个文件，释放 ${FREED_HR}MB，剩余约 ${REMAIN_HR}GB"
 }
 
 # ===== 启动检查 =====
@@ -284,6 +318,9 @@ while true; do
         echo "[rclone-sync]   ... 还有 $((FILE_COUNT - 5)) 个文件"
     fi
 
+    # ★ 上传前先执行清理，确保远端有足够空间接收新文件
+    cleanup_remote_storage || echo "[rclone-cleanup] 清理过程出现异常，将在下次重试"
+
     # 使用 rclone move 移动文件到远程（移动后本地删除，节省空间）
     echo "[rclone-sync] 执行 rclone move -> ${RCLONE_REMOTE} ..."
     rclone move "${MEDIA_PATH}/" "${RCLONE_REMOTE}/" \
@@ -303,6 +340,6 @@ while true; do
 
     echo "[rclone-sync] 同步完成"
 
-    # 同步后执行远程存储清理（循环存储）
+    # 同步后再次执行清理（处理上传后可能超限的情况）
     cleanup_remote_storage || echo "[rclone-cleanup] 清理过程出现异常，将在下次重试"
 done
